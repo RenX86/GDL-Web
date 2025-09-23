@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gallery-DL Web App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .download-form {
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="url"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .download-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            width: 100%;
+        }
+
+        .download-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .download-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-section {
+            margin-top: 30px;
+        }
+
+        .status-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .status-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .status-id {
+            font-size: 12px;
+            color: #666;
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-starting { background: #fff3cd; color: #856404; }
+        .status-downloading { background: #d4edda; color: #155724; }
+        .status-completed { background: #d1ecf1; color: #0c5460; }
+        .status-failed { background: #f8d7da; color: #721c24; }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s ease;
+        }
+
+        .url-display {
+            font-size: 14px;
+            color: #666;
+            word-break: break-all;
+            margin-top: 5px;
+        }
+
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .clear-btn {
+            background: #dc3545;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .clear-btn:hover {
+            background: #c82333;
+        }
+
+        .loading-spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 40px 20px;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                margin: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 Gallery-DL Web App</h1>
+            <p>Download media from various platforms with ease</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="download-form">
+                <div class="input-group">
+                    <label for="mediaUrl">Media URL</label>
+                    <input 
+                        type="url" 
+                        id="mediaUrl" 
+                        placeholder="Paste the URL of the media you want to download..."
+                        required
+                    >
+                </div>
+                
+                <button type="button" class="download-btn" onclick="startDownload()">
+                    Download Media
+                    <div class="loading-spinner" id="loadingSpinner"></div>
+                </button>
+            </div>
+            
+            <div class="controls">
+                <button type="button" class="clear-btn" onclick="clearHistory()">
+                    Clear History
+                </button>
+            </div>
+            
+            <div class="status-section">
+                <h3>Download Status</h3>
+                <div id="downloadsList">
+                    <div class="empty-state">
+                        No downloads yet. Enter a URL above to get started!
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+
+        // Start a download
+        function startDownload() {
+            const url = document.getElementById('mediaUrl').value.trim();
+            
+            if (!url) {
+                alert('Please enter a valid URL');
+                return;
+            }
+            
+            const downloadBtn = document.querySelector('.download-btn');
+            const spinner = document.getElementById('loadingSpinner');
+            
+            // Disable button and show spinner
+            downloadBtn.disabled = true;
+            spinner.style.display = 'inline-block';
+            
+            fetch('/api/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('mediaUrl').value = '';
+                    startRefreshing();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Network error occurred');
+            })
+            .finally(() => {
+                downloadBtn.disabled = false;
+                spinner.style.display = 'none';
+            });
+        }
+
+        // Refresh download status
+        function refreshDownloads() {
+            fetch('/api/downloads')
+                .then(response => response.json())
+                .then(data => {
+                    updateDownloadsList(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching downloads:', error);
+                });
+        }
+
+        // Update the downloads list
+        function updateDownloadsList(downloads) {
+            const downloadsList = document.getElementById('downloadsList');
+            
+            // Check if downloads is undefined or null
+            if (!downloads || !downloads.data || Object.keys(downloads.data).length === 0) {
+                downloadsList.innerHTML = '<div class="empty-state">No downloads yet. Enter a URL above to get started!</div>';
+                return;
+            }
+            
+            const html = Object.entries(downloads.data)
+                .sort(([,a], [,b]) => new Date(b.start_time) - new Date(a.start_time))
+                .map(([id, download]) => createDownloadCard(id, download))
+                .join('');
+            
+            downloadsList.innerHTML = html;
+        }
+
+        // Create a download card
+        function createDownloadCard(id, download) {
+            const progress = download.progress || 0;
+            const status = download.status || 'unknown';
+            const statusClass = `status-${status}`;
+            const message = download.message || 'No message available';
+            const url = download.url || 'No URL available';
+            const startTime = download.start_time ? new Date(download.start_time).toLocaleString() : 'Unknown';
+            
+            return `
+                <div class="status-card">
+                    <div class="status-header">
+                        <span class="status-id">ID: ${id}</span>
+                        <span class="status-badge ${statusClass}">${status}</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress}%"></div>
+                    </div>
+                    <div><strong>Message:</strong> ${message}</div>
+                    <div class="url-display"><strong>URL:</strong> ${url}</div>
+                    <div><strong>Started:</strong> ${startTime}</div>
+                </div>
+            `;
+        }
+
+        // Start refreshing downloads
+        function startRefreshing() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            
+            refreshInterval = setInterval(refreshDownloads, 2000);
+            refreshDownloads(); // Refresh immediately
+        }
+
+        // Clear download history
+        function clearHistory() {
+            if (!confirm('Are you sure you want to clear the download history?')) {
+                return;
+            }
+            
+            fetch('/api/clear-history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    refreshDownloads();
+                } else {
+                    alert('Error clearing history');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Network error occurred');
+            });
+        }
+
+        // Allow Enter key to start download
+        document.getElementById('mediaUrl').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                startDownload();
+            }
+        });
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDownloads();
+        });
+    </script>
+</body>
+</html>
