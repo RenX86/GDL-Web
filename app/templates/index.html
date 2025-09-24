@@ -64,7 +64,7 @@
             color: #333;
         }
 
-        input[type="url"] {
+        input[type="url"], input[type="file"] {
             width: 100%;
             padding: 15px;
             border: 2px solid #e1e5e9;
@@ -73,7 +73,7 @@
             transition: border-color 0.3s ease;
         }
 
-        input[type="url"]:focus {
+        input[type="url"]:focus, input[type="file"]:focus {
             outline: none;
             border-color: #667eea;
         }
@@ -238,6 +238,10 @@
                         required
                     >
                 </div>
+                <div class="input-group">
+                    <label for="cookieFile">Cookie File (Optional)</label>
+                    <input type="file" id="cookieFile" accept=".txt">
+                </div>
                 
                 <button type="button" class="download-btn" onclick="startDownload()">
                     Download Media
@@ -268,43 +272,57 @@
         // Start a download
         function startDownload() {
             const url = document.getElementById('mediaUrl').value.trim();
+            const cookieFile = document.getElementById('cookieFile').files[0];
             
             if (!url) {
                 alert('Please enter a valid URL');
                 return;
             }
-            
+
             const downloadBtn = document.querySelector('.download-btn');
             const spinner = document.getElementById('loadingSpinner');
             
             // Disable button and show spinner
             downloadBtn.disabled = true;
             spinner.style.display = 'inline-block';
-            
-            fetch('/api/download', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ url: url })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    document.getElementById('mediaUrl').value = '';
-                    startRefreshing();
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Network error occurred');
-            })
-            .finally(() => {
-                downloadBtn.disabled = false;
-                spinner.style.display = 'none';
-            });
+
+            const sendRequest = (cookiesContent) => {
+                fetch('/api/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url, cookies: cookiesContent })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('mediaUrl').value = '';
+                        document.getElementById('cookieFile').value = '';
+                        startRefreshing();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Network error occurred');
+                })
+                .finally(() => {
+                    downloadBtn.disabled = false;
+                    spinner.style.display = 'none';
+                });
+            };
+
+            if (cookieFile) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    sendRequest(e.target.result);
+                };
+                reader.readAsText(cookieFile);
+            } else {
+                sendRequest(null);
+            }
         }
 
         // Refresh download status
@@ -323,7 +341,6 @@
         function updateDownloadsList(downloads) {
             const downloadsList = document.getElementById('downloadsList');
             
-            // Check if downloads is undefined or null
             if (!downloads || !downloads.data || Object.keys(downloads.data).length === 0) {
                 downloadsList.innerHTML = '<div class="empty-state">No downloads yet. Enter a URL above to get started!</div>';
                 return;

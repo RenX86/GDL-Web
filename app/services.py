@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from urllib.parse import urlparse
 import validators
+import os
 
 class DownloadService:
     """Service class to handle all download operations"""
@@ -21,7 +22,7 @@ class DownloadService:
         except:
             return False
         
-    def start_download(self, url, output_dir):
+    def start_download(self, url, output_dir, cookies_content=None):
         """Start a new download and return download ID"""
         download_id = str(int(time.time() * 1000))  # More unique ID
         
@@ -30,7 +31,7 @@ class DownloadService:
             'id': download_id,
             'status': 'starting',
             'progress': 0,
-            'message': 'Initializing download...',
+            'message': 'Initializing download...', 
             'url': url,
             'start_time': datetime.now().isoformat(),
             'end_time': None,
@@ -43,15 +44,16 @@ class DownloadService:
         # Start download in background thread
         thread = threading.Thread(
             target=self._download_worker, 
-            args=(download_id, url, output_dir)
+            args=(download_id, url, output_dir, cookies_content)
         )
         thread.daemon = True
         thread.start()
         
         return download_id
     
-    def _download_worker(self, download_id, url, output_dir):
+    def _download_worker(self, download_id, url, output_dir, cookies_content=None):
         """Background worker to handle the actual download"""
+        cookie_file_path = None
         try:
             # Update status to downloading
             self.download_status[download_id].update({
@@ -67,8 +69,17 @@ class DownloadService:
                 '--filename', '{category}_{subcategory}_{filename}.{extension}',
                 '--write-info-json',
                 '--verbose',
-                url
             ]
+
+            if cookies_content:
+                cookies_dir = os.path.join(output_dir, 'cookies')
+                os.makedirs(cookies_dir, exist_ok=True)
+                cookie_file_path = os.path.join(cookies_dir, f'{download_id}.txt')
+                with open(cookie_file_path, 'w') as f:
+                    f.write(cookies_content)
+                cmd.extend(['--cookies', cookie_file_path])
+
+            cmd.append(url)
             
             # Execute gallery-dl with real-time output capture
             process = subprocess.Popen(
@@ -136,7 +147,10 @@ class DownloadService:
             })
             # Clean up active process
             self.active_processes.pop(download_id, None)
-    
+        finally:
+            if cookie_file_path and os.path.exists(cookie_file_path):
+                os.remove(cookie_file_path)
+
     def _parse_progress(self, download_id, line):
         """Parse gallery-dl output to extract progress information"""
         try:

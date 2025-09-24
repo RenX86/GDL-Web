@@ -27,6 +27,7 @@ def start_download():
     try:
         data = request.get_json()
         url = data.get('url')
+        cookies_content = data.get('cookies')
         
         if not url:
             return jsonify({
@@ -44,7 +45,8 @@ def start_download():
         # Start download using config from Flask app
         download_id = download_service.start_download(
             url, 
-            current_app.config['DOWNLOADS_DIR']  # Using centralized config
+            current_app.config['DOWNLOADS_DIR'],
+            cookies_content
         )
         
         return jsonify({
