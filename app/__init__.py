@@ -1,17 +1,14 @@
+# app/__init__.py - Simplified, no duplicate config
 from flask import Flask
-import os
+from .config import get_config
 
-def create_app():
+def create_app(config_name=None):
     """Application factory pattern"""
     app = Flask(__name__)
     
-    # Configuration
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-    app.config['DOWNLOADS_DIR'] = os.path.join(os.getcwd(), 'downloads')
-    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-    
-    # Create downloads directory
-    os.makedirs(app.config['DOWNLOADS_DIR'], exist_ok=True)
+    # Get configuration class and initialize
+    config_class = get_config(config_name)
+    config_class.init_app(app)
     
     # Register blueprints
     from .routes import main_bp, api_bp

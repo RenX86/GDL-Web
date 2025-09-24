@@ -4,6 +4,7 @@ import time
 import re
 from datetime import datetime
 from urllib.parse import urlparse
+import validators
 
 class DownloadService:
     """Service class to handle all download operations"""
@@ -19,7 +20,7 @@ class DownloadService:
             return all([result.scheme, result.netloc])
         except:
             return False
-    
+        
     def start_download(self, url, output_dir):
         """Start a new download and return download ID"""
         download_id = str(int(time.time() * 1000))  # More unique ID

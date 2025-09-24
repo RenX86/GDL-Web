@@ -41,10 +41,10 @@ def start_download():
                 'error': 'Invalid URL format'
             }), 400
         
-        # Start download
+        # Start download using config from Flask app
         download_id = download_service.start_download(
             url, 
-            current_app.config['DOWNLOADS_DIR']
+            current_app.config['DOWNLOADS_DIR']  # Using centralized config
         )
         
         return jsonify({
@@ -178,6 +178,25 @@ def get_statistics():
         
     except Exception as e:
         current_app.logger.error(f"Statistics error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error'
+        }), 500
+
+@api_bp.route('/config')
+def get_app_config():
+    """Get relevant app configuration for frontend"""
+    try:
+        return jsonify({
+            'success': True,
+            'data': {
+                'max_file_size': current_app.config['MAX_CONTENT_LENGTH'],
+                'downloads_dir': os.path.basename(current_app.config['DOWNLOADS_DIR']),
+                'debug_mode': current_app.config.get('DEBUG', False)
+            }
+        })
+    except Exception as e:
+        current_app.logger.error(f"Config error: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Internal server error'
