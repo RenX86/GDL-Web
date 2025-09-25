@@ -1,10 +1,8 @@
 import subprocess
 import threading
 import time
-import re
 from datetime import datetime
 from urllib.parse import urlparse
-import validators
 import os
 
 class DownloadService:

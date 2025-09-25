@@ -14,12 +14,6 @@ download_service = DownloadService()
 def index():
     """Serve the main page"""
     return render_template('index.html')
-
-@main_bp.route('/downloads')
-def downloads_page():
-    """Serve downloads management page (for future expansion)"""
-    return render_template('downloads.html')
-
 # API routes
 @api_bp.route('/download', methods=['POST'])
 def start_download():
