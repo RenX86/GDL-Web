@@ -21,10 +21,8 @@ class Config:
     # Gallery-dl Configuration
     GALLERY_DL_CONFIG = {
         'extractor': {
-            'base-directory': None,  # Will be set to DOWNLOADS_DIR
             'filename': '{category}_{subcategory}_{filename}.{extension}',
             'write-info-json': True,
-            'write-thumbnail': True,
         }
     }
     
@@ -34,8 +32,7 @@ class Config:
         # Create downloads directory
         Path(cls.DOWNLOADS_DIR).mkdir(exist_ok=True)
         
-        # Set gallery-dl base directory
-        cls.GALLERY_DL_CONFIG['extractor']['base-directory'] = cls.DOWNLOADS_DIR
+
         
         # Apply all config to Flask app
         app.config.update({
@@ -116,9 +113,3 @@ def get_config(config_name=None):
     if config_name is None:
         config_name = os.environ.get('FLASK_ENV', 'development')
     return config.get(config_name, config['default'])
-
-# Utility function to access config anywhere in the app
-def get_config_value(key, default=None):
-    """Get a specific configuration value"""
-    config_class = get_config()
-    return getattr(config_class, key, default)

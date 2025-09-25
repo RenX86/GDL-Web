@@ -8,9 +8,11 @@ import os
 class DownloadService:
     """Service class to handle all download operations"""
     
-    def __init__(self):
+    def __init__(self, config):
         self.download_status = {}
         self.active_processes = {}
+        self.config = config
+
     
     def is_valid_url(self, url):
         """Validate if the provided URL is valid"""
@@ -59,15 +61,17 @@ class DownloadService:
                 'message': 'Starting gallery-dl process...'
             })
             
-            # Prepare gallery-dl command with better options
-            cmd = [
-                'gallery-dl',
-                '--dest', output_dir,
-                '--directory', '{category}',
-                '--filename', '{category}_{subcategory}_{filename}.{extension}',
-                '--write-info-json',
-                '--verbose',
-            ]
+            # Prepare gallery-dl command from config
+            cmd = ['gallery-dl']
+            for section, settings in self.config.items():
+                for key, value in settings.items():
+                    if isinstance(value, bool) and value:
+                        cmd.append(f'--{key}')
+                    elif not isinstance(value, bool) and value is not None:
+                        cmd.extend([f'--{key}', str(value)])
+
+            cmd.extend(['-D', output_dir])
+            cmd.append('--verbose')
 
             if cookies_content:
                 cookies_dir = os.path.join(output_dir, 'cookies')

@@ -6,9 +6,6 @@ import os
 main_bp = Blueprint('main', __name__)
 api_bp = Blueprint('api', __name__)
 
-# Initialize download service
-download_service = DownloadService()
-
 # Main routes
 @main_bp.route('/')
 def index():
@@ -30,14 +27,14 @@ def start_download():
             }), 400
         
         # Validate URL format
-        if not download_service.is_valid_url(url):
+        if not current_app.download_service.is_valid_url(url):
             return jsonify({
                 'success': False,
                 'error': 'Invalid URL format'
             }), 400
         
         # Start download using config from Flask app
-        download_id = download_service.start_download(
+        download_id = current_app.download_service.start_download(
             url, 
             current_app.config['DOWNLOADS_DIR'],
             cookies_content
@@ -60,7 +57,7 @@ def start_download():
 def get_download_status(download_id):
     """Get status of a specific download"""
     try:
-        status = download_service.get_status(download_id)
+        status = current_app.download_service.get_status(download_id)
         
         if not status:
             return jsonify({
@@ -84,7 +81,7 @@ def get_download_status(download_id):
 def list_all_downloads():
     """Get list of all downloads"""
     try:
-        downloads = download_service.get_all_downloads()
+        downloads = current_app.download_service.get_all_downloads()
         return jsonify({
             'success': True,
             'data': downloads
@@ -101,7 +98,7 @@ def list_all_downloads():
 def delete_download(download_id):
     """Delete a specific download from history"""
     try:
-        success = download_service.delete_download(download_id)
+        success = current_app.download_service.delete_download(download_id)
         
         if not success:
             return jsonify({
@@ -125,7 +122,7 @@ def delete_download(download_id):
 def clear_download_history():
     """Clear all download history"""
     try:
-        download_service.clear_all_downloads()
+        current_app.download_service.clear_all_downloads()
         return jsonify({
             'success': True,
             'message': 'Download history cleared successfully'
@@ -142,7 +139,7 @@ def clear_download_history():
 def cancel_download(download_id):
     """Cancel a running download"""
     try:
-        success = download_service.cancel_download(download_id)
+        success = current_app.download_service.cancel_download(download_id)
         
         if not success:
             return jsonify({
@@ -166,7 +163,7 @@ def cancel_download(download_id):
 def get_statistics():
     """Get download statistics"""
     try:
-        stats = download_service.get_statistics()
+        stats = current_app.download_service.get_statistics()
         return jsonify({
             'success': True,
             'data': stats
