@@ -1,6 +1,11 @@
 # config.py - Single source of truth for all configuration
 import os
+import secrets
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Config:
     """Base configuration class - all config should be defined here"""
@@ -8,11 +13,18 @@ class Config:
     # Server Configuration
     HOST = os.environ.get('HOST', '0.0.0.0')
     PORT = int(os.environ.get('PORT', 5000))
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Generate a random secret key if not provided
+    SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
     
     # Application Configuration
     DOWNLOADS_DIR = os.environ.get('DOWNLOADS_DIR') or os.path.join(os.getcwd(), 'downloads')
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+    
+    # Security Configuration
+    COOKIES_DIR = os.environ.get('COOKIES_DIR') or os.path.join(os.getcwd(), 'secure_cookies')
+    COOKIES_ENCRYPTION_KEY = os.environ.get('COOKIES_ENCRYPTION_KEY')
+    if not COOKIES_ENCRYPTION_KEY:
+        raise ValueError("No COOKIES_ENCRYPTION_KEY set for Flask application. Please set it in your environment.")
     
     # Logging Configuration
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
@@ -44,6 +56,8 @@ class Config:
             'LOG_LEVEL': cls.LOG_LEVEL,
             'LOG_FILE': cls.LOG_FILE,
             'GALLERY_DL_CONFIG': cls.GALLERY_DL_CONFIG,
+            'COOKIES_DIR': cls.COOKIES_DIR,
+            'COOKIES_ENCRYPTION_KEY': cls.COOKIES_ENCRYPTION_KEY,
         })
 
 class DevelopmentConfig(Config):

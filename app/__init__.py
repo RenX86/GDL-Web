@@ -12,7 +12,11 @@ def create_app(config_name=None):
     config_class.init_app(app)
     
     # Initialize download service with config and attach to app
-    app.download_service = DownloadService(app.config['GALLERY_DL_CONFIG'])
+    app.download_service = DownloadService({
+        'GALLERY_DL_CONFIG': app.config['GALLERY_DL_CONFIG'],
+        'COOKIES_DIR': app.config['COOKIES_DIR'],
+        'COOKIES_ENCRYPTION_KEY': app.config['COOKIES_ENCRYPTION_KEY']
+    })
     
     # Register blueprints
     from .routes import main_bp, api_bp

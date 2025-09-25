@@ -7,6 +7,8 @@ from datetime import datetime
 from urllib.parse import urlparse
 import os
 import logging
+from cryptography.fernet import Fernet
+import base64
 
 class DownloadService:
     """Service class to handle all download operations"""
@@ -20,8 +22,43 @@ class DownloadService:
         # Retry configuration
         self.max_retries = 3
         self.retry_delay = 5  # seconds
+        
+        # Setup encryption for cookies
+        self.cookies_dir = config.get('COOKIES_DIR', os.path.join(os.getcwd(), 'secure_cookies'))
+        os.makedirs(self.cookies_dir, exist_ok=True)
+        
+        # Initialize encryption key
+        encryption_key = config.get('COOKIES_ENCRYPTION_KEY')
+        if encryption_key:
+            self.cipher = Fernet(encryption_key.encode())
+        else:
+            self.logger.warning("No encryption key provided, cookies will not be encrypted")
 
     
+    def _encrypt_cookies(self, cookies_content):
+        """Encrypt cookies content"""
+        if not hasattr(self, 'cipher'):
+            self.logger.warning("No encryption cipher available, returning cookies unencrypted")
+            return cookies_content
+        
+        try:
+            return self.cipher.encrypt(cookies_content.encode()).decode()
+        except Exception as e:
+            self.logger.error(f"Error encrypting cookies: {e}")
+            return cookies_content
+    
+    def _decrypt_cookies(self, encrypted_content):
+        """Decrypt cookies content"""
+        if not hasattr(self, 'cipher'):
+            self.logger.warning("No encryption cipher available, returning cookies as-is")
+            return encrypted_content
+        
+        try:
+            return self.cipher.decrypt(encrypted_content.encode()).decode()
+        except Exception as e:
+            self.logger.error(f"Error decrypting cookies: {e}")
+            return encrypted_content
+        
     def is_valid_url(self, url):
         """Validate if the provided URL is valid"""
         try:
@@ -29,7 +66,7 @@ class DownloadService:
             return all([result.scheme, result.netloc])
         except:
             return False
-        
+            
     def start_download(self, url, output_dir, cookies_content=None):
         """Start a new download and return download ID"""
         download_id = str(int(time.time() * 1000))  # More unique ID
@@ -57,6 +94,14 @@ class DownloadService:
         thread.daemon = True
         thread.start()
         
+        # Store encrypted cookies if provided
+        if cookies_content:
+            cookie_file_name = f"{download_id}.txt"
+            cookie_file_path = os.path.join(self.cookies_dir, cookie_file_name)
+            encrypted_content = self._encrypt_cookies(cookies_content)
+            with open(cookie_file_path, 'w') as f:
+                f.write(encrypted_content)
+            
         return download_id
     
     def _download_worker(self, download_id, url, output_dir, cookies_content=None):
@@ -65,6 +110,10 @@ class DownloadService:
         retry_count = 0
         last_error = None
         
+        # Get cookie file path if cookies were provided
+        if cookies_content:
+            cookie_file_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
+            
         # Check network connectivity first
         if not self._check_network_connectivity():
             self.download_status[download_id].update({
@@ -106,23 +155,32 @@ class DownloadService:
                 
                 # Prepare gallery-dl command from config
                 cmd = ['gallery-dl']
-                for section, settings in self.config.items():
-                    for key, value in settings.items():
-                        if isinstance(value, bool) and value:
-                            cmd.append(f'--{key}')
-                        elif not isinstance(value, bool) and value is not None:
-                            cmd.extend([f'--{key}', str(value)])
+                gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
+                if isinstance(gallery_dl_config, dict):
+                    for section, settings in gallery_dl_config.items():
+                        if isinstance(settings, dict):
+                            for key, value in settings.items():
+                                if isinstance(value, bool) and value:
+                                    cmd.append(f'--{key}')
+                                elif not isinstance(value, bool) and value is not None:
+                                    cmd.extend([f'--{key}', str(value)])
 
                 cmd.extend(['-D', output_dir])
                 cmd.append('--verbose')
 
                 if cookies_content:
-                    cookies_dir = os.path.join(output_dir, 'cookies')
-                    os.makedirs(cookies_dir, exist_ok=True)
-                    cookie_file_path = os.path.join(cookies_dir, f'{download_id}.txt')
-                    with open(cookie_file_path, 'w') as f:
-                        f.write(cookies_content)
-                    cmd.extend(['--cookies', cookie_file_path])
+                    # Use the secure cookie file that was already created
+                    if cookie_file_path and os.path.exists(cookie_file_path):
+                        # Read and decrypt the cookie content
+                        with open(cookie_file_path, 'r') as f:
+                            encrypted_content = f.read()
+                        decrypted_content = self._decrypt_cookies(encrypted_content)
+                        
+                        # Write the decrypted content to a temporary file in the cookies directory for gallery-dl to use
+                        temp_cookie_path = os.path.join(self.cookies_dir, '.temp_cookies.txt')
+                        with open(temp_cookie_path, 'w') as f:
+                            f.write(decrypted_content)
+                        cmd.extend(['--cookies', temp_cookie_path])
 
                 cmd.append(url)
                 
@@ -243,12 +301,19 @@ class DownloadService:
                 'network_issue': True
             })
             
-        # Clean up cookie file if it exists
+        # Clean up cookie files if they exist
         try:
+            # Remove the encrypted cookie file
             if cookie_file_path and os.path.exists(cookie_file_path):
                 os.remove(cookie_file_path)
+                
+            # Remove the temporary decrypted cookie file
+            temp_cookie_path = os.path.join(self.cookies_dir, '.temp_cookies.txt')
+            if os.path.exists(temp_cookie_path):
+                os.remove(temp_cookie_path)
+                self.logger.info(f"Removed temporary cookie file: {temp_cookie_path}")
         except Exception as e:
-            self.logger.error(f"Error removing cookie file: {str(e)}")
+            self.logger.error(f"Error removing cookie files: {str(e)}")
 
     def _check_network_connectivity(self):
         """Check if there is an active internet connection"""
