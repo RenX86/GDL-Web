@@ -33,8 +33,11 @@ class Config:
     # Gallery-dl Configuration
     GALLERY_DL_CONFIG = {
         'extractor': {
-            'filename': '{category}_{subcategory}_{filename}.{extension}',
+            'filename': '{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}',
             'write-info-json': True,
+        },
+        'instagram': {
+            'filename': 'PostBy_{username}_{post_shortcode}_{num}.{extension}'
         }
     }
     
