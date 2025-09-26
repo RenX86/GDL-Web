@@ -97,4 +97,5 @@ def main():
     return app
 
 # Create the app instance for WSGI servers (Gunicorn)
-app = main()
+if __name__ == '__main__':
+    app = main()
