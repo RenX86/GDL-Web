@@ -65,8 +65,14 @@ def main():
     # Create Flask app with configuration
     app = create_app(config_name)
     
+    # Get port from environment variable directly for Render compatibility
+    port = int(os.environ.get('PORT', config_class.PORT))
+    
     # Print startup information using config values
-    print(f"🌐 Server starting on http://{config_class.HOST}:{config_class.PORT}")
+    print(f"🔧 Development mode active")
+    print(f"📁 Downloads directory: {config_class.DOWNLOADS_DIR}")
+    print(f"🌐 Server will run on {config_class.HOST}:{port}")
+    print(f"🌐 Server starting on http://{config_class.HOST}:{port}")
     print(f"🔧 Environment: {config_name}")
     print(f"🔧 Debug mode: {'ON' if config_class.DEBUG else 'OFF'}")
     print(f"📁 Downloads will be saved to: {config_class.DOWNLOADS_DIR}")
@@ -78,7 +84,7 @@ def main():
             # Run the Flask application using config values
             app.run(
                 host=config_class.HOST,
-                port=config_class.PORT,
+                port=port,
                 debug=config_class.DEBUG,
                 threaded=True  # Allow multiple concurrent requests
             )
