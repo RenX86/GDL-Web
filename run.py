@@ -52,7 +52,12 @@ def main():
     print("🎨 Starting Gallery-DL Web App...")
     
     # Get configuration
-    config_name = os.environ.get('FLASK_ENV', 'development')
+    config_env = os.environ.get('FLASK_ENV')
+    # If a managed platform provides PORT but FLASK_ENV isn't set, default to production
+    if 'PORT' in os.environ and not config_env:
+        config_name = 'production'
+    else:
+        config_name = config_env or 'development'
     config_class = get_config(config_name)
     
     # Setup logging
@@ -65,18 +70,15 @@ def main():
     # Create Flask app with configuration
     app = create_app(config_name)
     
-    # Determine if running on Render (Render sets PORT env var)
-    is_render = 'PORT' in os.environ and 'RENDER' in os.environ
+    # Determine if running on a managed platform (Render or similar) where PORT is provided
+    is_managed = 'PORT' in os.environ
     
-    # Get port - use environment PORT for Render, config PORT for local
-    if is_render:
-        port = int(os.environ.get('PORT'))
-    else:
-        port = config_class.PORT
+    # Get port - prefer environment PORT when available
+    port = int(os.environ.get('PORT', config_class.PORT))
     
     # Print startup information using config values
-    if is_render:
-        print(f"🌐 Running on Render")
+    if is_managed:
+        print(f"🌐 Running on Render/Managed platform")
     else:
         print(f"🌐 Running locally")
     
