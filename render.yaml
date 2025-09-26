@@ -9,6 +9,20 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
+      - key: SECRET_KEY
+        sync: false
+      - key: COOKIES_ENCRYPTION_KEY
+        sync: false
+      - key: DOWNLOADS_DIR
+        value: downloads
+      - key: COOKIES_DIR
+        value: secure_cookies
+      - key: MAX_CONTENT_LENGTH
+        value: 16777216
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FILE
+        value: app.log
     disk:
       name: downloads
       mountPath: /app/downloads
