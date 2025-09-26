@@ -73,19 +73,22 @@ def main():
     print("🚀 Ready to download media!")
     print("-" * 50)
     
-    try:
-        # Run the Flask application using config values
-        app.run(
-            host=config_class.HOST,
-            port=config_class.PORT,
-            debug=config_class.DEBUG,
-            threaded=True  # Allow multiple concurrent requests
-        )
-    except KeyboardInterrupt:
-        print("\n👋 Shutting down gracefully...")
-    except Exception as e:
-        print(f"❌ Error starting server: {e}")
-        sys.exit(1)
+    if __name__ == '__main__':
+        try:
+            # Run the Flask application using config values
+            app.run(
+                host=config_class.HOST,
+                port=config_class.PORT,
+                debug=config_class.DEBUG,
+                threaded=True  # Allow multiple concurrent requests
+            )
+        except KeyboardInterrupt:
+            print("\n👋 Shutting down gracefully...")
+        except Exception as e:
+            print(f"❌ Error starting server: {e}")
+            sys.exit(1)
+    
+    return app
 
-if __name__ == '__main__':
-    main()
+# Create the app instance for WSGI servers (Gunicorn)
+app = main()
