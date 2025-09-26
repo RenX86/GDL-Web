@@ -65,17 +65,25 @@ def main():
     # Create Flask app with configuration
     app = create_app(config_name)
     
-    # Get port from environment variable directly for Render compatibility
-    port = int(os.environ.get('PORT', config_class.PORT))
+    # Determine if running on Render (Render sets PORT env var)
+    is_render = 'PORT' in os.environ and 'RENDER' in os.environ
+    
+    # Get port - use environment PORT for Render, config PORT for local
+    if is_render:
+        port = int(os.environ.get('PORT'))
+    else:
+        port = config_class.PORT
     
     # Print startup information using config values
-    print(f"🔧 Development mode active")
-    print(f"📁 Downloads directory: {config_class.DOWNLOADS_DIR}")
-    print(f"🌐 Server will run on {config_class.HOST}:{port}")
-    print(f"🌐 Server starting on http://{config_class.HOST}:{port}")
+    if is_render:
+        print(f"🌐 Running on Render")
+    else:
+        print(f"🌐 Running locally")
+    
     print(f"🔧 Environment: {config_name}")
     print(f"🔧 Debug mode: {'ON' if config_class.DEBUG else 'OFF'}")
     print(f"📁 Downloads will be saved to: {config_class.DOWNLOADS_DIR}")
+    print(f"🌐 Server will listen on {config_class.HOST}:{port}")
     print("🚀 Ready to download media!")
     print("-" * 50)
     
@@ -97,5 +105,4 @@ def main():
     return app
 
 # Create the app instance for WSGI servers (Gunicorn)
-if __name__ == '__main__':
-    app = main()
+app = main()
