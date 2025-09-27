@@ -8,21 +8,9 @@ for both development and production environments.
 
 import os
 import sys
-import logging
 from app import create_app
 from app.config import get_config
-
-def setup_logging(config_class):
-    """Configure logging for the application"""
-    log_level = getattr(logging, config_class.LOG_LEVEL.upper())
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(config_class.LOG_FILE)
-        ]
-    )
+from app.logging_config import setup_logging
 
 def check_dependencies():
     """Check if required dependencies are installed"""
@@ -60,8 +48,8 @@ def main():
         config_name = config_env or 'development'
     config_class = get_config(config_name)
     
-    # Setup logging
-    setup_logging(config_class)
+    # Setup logging using centralized configuration
+    setup_logging(config_class.LOG_LEVEL, config_class.LOG_FILE)
     
     # Check dependencies
     if not check_dependencies():

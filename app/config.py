@@ -41,13 +41,15 @@ class Config:
         }
     }
     
+    # Default values for subclasses
+    DEBUG = False
+    TESTING = False
+    
     @classmethod
     def init_app(cls, app):
         """Initialize application with this config"""
         # Create downloads directory
         Path(cls.DOWNLOADS_DIR).mkdir(exist_ok=True)
-        
-
         
         # Apply all config to Flask app
         app.config.update({
@@ -61,7 +63,12 @@ class Config:
             'GALLERY_DL_CONFIG': cls.GALLERY_DL_CONFIG,
             'COOKIES_DIR': cls.COOKIES_DIR,
             'COOKIES_ENCRYPTION_KEY': cls.COOKIES_ENCRYPTION_KEY,
+            'DEBUG': cls.DEBUG,
+            'TESTING': cls.TESTING,
         })
+        
+        # Call subclass-specific initialization
+        cls._init_subclass_specific(app)
 
 class DevelopmentConfig(Config):
     """Development configuration"""
@@ -70,9 +77,8 @@ class DevelopmentConfig(Config):
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
     
     @classmethod
-    def init_app(cls, app):
-        super().init_app(app)
-        app.config['DEBUG'] = cls.DEBUG
+    def _init_subclass_specific(cls, app):
+        """Development-specific initialization"""
         print(f"🔧 Development mode active")
         print(f"📁 Downloads directory: {cls.DOWNLOADS_DIR}")
         print(f"🌐 Server will run on {cls.HOST}:{cls.PORT}")
@@ -92,10 +98,8 @@ class ProductionConfig(Config):
     }
     
     @classmethod
-    def init_app(cls, app):
-        super().init_app(app)
-        app.config['DEBUG'] = cls.DEBUG
-        
+    def _init_subclass_specific(cls, app):
+        """Production-specific initialization"""
         # Add security headers middleware
         @app.after_request
         def set_security_headers(response):
@@ -110,12 +114,9 @@ class TestingConfig(Config):
     DOWNLOADS_DIR = os.path.join(os.getcwd(), 'test_downloads')
     
     @classmethod
-    def init_app(cls, app):
-        super().init_app(app)
-        app.config.update({
-            'DEBUG': cls.DEBUG,
-            'TESTING': cls.TESTING,
-        })
+    def _init_subclass_specific(cls, app):
+        """Testing-specific initialization"""
+        pass
 
 # Configuration registry
 config = {
