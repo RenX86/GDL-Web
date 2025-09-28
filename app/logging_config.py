@@ -33,11 +33,20 @@ def setup_logging(log_level='INFO', log_file='app.log'):
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler(log_file)
-        ]
+        ],
+        force=True  # Ensure our configuration overrides any existing handlers/levels
     )
     
     # Set specific logger levels for third-party libraries
-    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    env = os.environ.get('FLASK_ENV', 'development')
+    if env == 'development':
+        # Show request logs during development
+        logging.getLogger('werkzeug').setLevel(logging.INFO)
+        logging.getLogger('flask.app').setLevel(numeric_level)
+    else:
+        # Keep noisy libraries quieter in production
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
+        logging.getLogger('flask.app').setLevel(logging.WARNING)
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     
     return logging.getLogger(__name__)

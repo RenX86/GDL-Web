@@ -169,6 +169,7 @@ class DownloadService:
                         'status': 'downloading',
                         'message': 'Starting gallery-dl process...'
                     })
+                    self.logger.info(f"Starting download {download_id} for URL: {url}")
                 
                 # Prepare gallery-dl command from config
                 cmd = ['gallery-dl']
@@ -202,8 +203,11 @@ class DownloadService:
                 cmd.append(url)
                 
                 # Execute gallery-dl with real-time output capture
+                # Log the command we're about to run (without exposing secrets)
+                self.logger.debug(f"Starting gallery-dl with command: {cmd} (cookies: {'yes' if cookies_content else 'no'})")
+                
                 process = subprocess.Popen(
-                    cmd,
+                    cmd + [url],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -228,6 +232,8 @@ class DownloadService:
                         line = process.stdout.readline()
                         if line:
                             stdout_lines.append(line.strip())
+                            # Emit gallery-dl output to logs for visibility
+                            self.logger.debug(f"[gallery-dl] {line.strip()}")
                             parse_progress(self.download_status, download_id, line)
                             
                             # Check for network-related errors in output
@@ -265,6 +271,7 @@ class DownloadService:
                         'files_downloaded': count_downloaded_files(stdout_lines),
                         'retry_count': retry_count
                     })
+                    self.logger.info(f"Download {download_id} completed: {self.download_status[download_id].get('files_downloaded', 0)} files downloaded")
                     # Success, break out of retry loop
                     break
                 else:
@@ -287,6 +294,7 @@ class DownloadService:
                         'error': error_message,
                         'retry_count': retry_count
                     })
+                    self.logger.error(f"Download {download_id} failed: {error_message} (retry_count={retry_count})")
                     break
                     
             except Exception as e:
@@ -306,6 +314,7 @@ class DownloadService:
                     'error': str(e),
                     'retry_count': retry_count
                 })
+                self.logger.error(f"Download {download_id} failed with exception after retries: {str(e)}")
                 
                 # Clean up active process
                 self.active_processes.pop(download_id, None)
@@ -317,13 +326,14 @@ class DownloadService:
                 'message': f'Download failed due to persistent network issues. Please check your internet connection and try again later.',
                 'network_issue': True
             })
-            
+            self.logger.warning(f"Download {download_id} failed due to persistent network issues.")
+        
         # Clean up cookie files if they exist
         try:
             # Remove the encrypted cookie file
             if cookie_file_path and os.path.exists(cookie_file_path):
                 os.remove(cookie_file_path)
-                
+            
             # Remove the temporary decrypted cookie file
             temp_cookie_path = os.path.join(self.cookies_dir, '.temp_cookies.txt')
             if os.path.exists(temp_cookie_path):
@@ -413,3 +423,84 @@ class DownloadService:
             list: List of download status dictionaries
         """
         return list(self.download_status.values())
+
+    def download_exists(self, download_id):
+        """
+        Check if a download exists in the service.
+        
+        Args:
+            download_id (str): Download ID to check
+        
+        Returns:
+            bool: True if exists, False otherwise
+        """
+        return download_id in self.download_status
+
+    def delete_download(self, download_id):
+        """
+        Delete a download entry and clean up related resources.
+        If the download is active, attempt to terminate the process first.
+        
+        Args:
+            download_id (str): Download ID to delete
+        
+        Returns:
+            bool: True if deletion processed
+        """
+        # Terminate active process if any
+        if download_id in self.active_processes:
+            process = self.active_processes.get(download_id)
+            try:
+                process.terminate()
+            except Exception as e:
+                self.logger.error(f"Error terminating process for {download_id}: {str(e)}")
+            finally:
+                self.active_processes.pop(download_id, None)
+        
+        # Remove status entry
+        if download_id in self.download_status:
+            self.download_status.pop(download_id, None)
+        
+        # Remove encrypted cookie file if present
+        try:
+            enc_cookie_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
+            if os.path.exists(enc_cookie_path):
+                os.remove(enc_cookie_path)
+        except Exception as e:
+            self.logger.error(f"Error removing cookie file for {download_id}: {str(e)}")
+        
+        return True
+
+    def clear_history(self):
+        """
+        Clear all download history and cleanup resources.
+        Terminates any active processes, removes cookie files related to downloads,
+        and empties the download status registry.
+        """
+        # Terminate all active processes
+        for did, process in list(self.active_processes.items()):
+            try:
+                process.terminate()
+            except Exception as e:
+                self.logger.error(f"Error terminating process for {did}: {str(e)}")
+        self.active_processes.clear()
+        
+        # Remove cookie files for known downloads
+        for did in list(self.download_status.keys()):
+            try:
+                enc_cookie_path = os.path.join(self.cookies_dir, f"{did}.txt")
+                if os.path.exists(enc_cookie_path):
+                    os.remove(enc_cookie_path)
+            except Exception as e:
+                self.logger.error(f"Error removing cookie file for {did}: {str(e)}")
+        
+        # Remove temporary cookie file if present
+        try:
+            temp_cookie_path = os.path.join(self.cookies_dir, '.temp_cookies.txt')
+            if os.path.exists(temp_cookie_path):
+                os.remove(temp_cookie_path)
+        except Exception as e:
+            self.logger.error(f"Error removing temp cookie file: {str(e)}")
+        
+        # Clear status registry
+        self.download_status.clear()

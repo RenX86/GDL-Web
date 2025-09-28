@@ -36,9 +36,6 @@ class Config:
             'filename': '{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}',
             'write-info-json': True,
         },
-        'instagram': {
-            'filename': 'PostBy_{username}_{post_shortcode}_{num}.{extension}'
-        }
     }
     
     # Default values for subclasses

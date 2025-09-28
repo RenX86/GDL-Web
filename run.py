@@ -41,11 +41,10 @@ def main():
     
     # Get configuration
     config_env = os.environ.get('FLASK_ENV')
-    # If a managed platform provides PORT but FLASK_ENV isn't set, default to production
-    if 'PORT' in os.environ and not config_env:
-        config_name = 'production'
-    else:
-        config_name = config_env or 'development'
+    # Always default to development locally unless FLASK_ENV is explicitly set
+    config_name = config_env or 'development'
+    # Keep FLASK_ENV in sync so logging_config can determine environment-specific logger levels
+    os.environ['FLASK_ENV'] = config_name
     config_class = get_config(config_name)
     
     # Setup logging using centralized configuration

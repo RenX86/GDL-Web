@@ -72,7 +72,11 @@ function refreshDownloads() {
 function updateDownloadsList(downloads) {
     const downloadsList = document.getElementById('downloadsList');
     
-    if (!downloads || !downloads.data || Object.keys(downloads.data).length === 0) {
+    // Normalize API response: backend returns an array of download objects
+    const rawData = (downloads && downloads.data) ? downloads.data : [];
+    const items = Array.isArray(rawData) ? rawData : Object.values(rawData);
+
+    if (!items || items.length === 0) {
         downloadsList.innerHTML = `
             <div class="empty-state">
                 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -85,9 +89,10 @@ function updateDownloadsList(downloads) {
         return;
     }
     
-    const html = Object.entries(downloads.data)
-        .sort(([,a], [,b]) => new Date(b.start_time) - new Date(a.start_time))
-        .map(([id, download]) => createDownloadCard(id, download))
+    const html = items
+        .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+        // Use the real download.id from backend instead of array index
+        .map((download) => createDownloadCard(download.id || 'unknown', download))
         .join('');
     
     downloadsList.innerHTML = html;
@@ -98,25 +103,35 @@ function updateDownloadsList(downloads) {
 
 // Create a download card
 function createDownloadCard(id, download) {
-    const progress = download.progress || 0;
+    const rawProgress = typeof download.progress === 'number' ? download.progress : parseFloat(download.progress) || 0;
+    const progress = Math.max(0, Math.min(100, rawProgress));
     const status = download.status || 'pending';
     let statusClass = '';
+    let badgeText = '';
     
-    // Map status to appropriate class
+    // Map status to appropriate class and user-friendly badge text
     switch(status) {
         case 'completed':
             statusClass = 'completed';
+            badgeText = 'COMPLETED';
             break;
         case 'in_progress':
         case 'downloading':
+        case 'starting':
+        case 'processing':
+        case 'retrying':
             statusClass = 'in-progress';
+            badgeText = 'IN PROGRESS';
             break;
         case 'error':
         case 'failed':
+        case 'cancelled':
             statusClass = 'error';
+            badgeText = 'FAILED';
             break;
         default:
             statusClass = 'pending';
+            badgeText = 'PENDING';
     }
     
     const message = download.message || 'No message available';
@@ -127,10 +142,12 @@ function createDownloadCard(id, download) {
         <div class="status-card" data-status="${statusClass}">
             <div class="status-header">
                 <div class="status-title">${url}</div>
-                <span class="status-badge ${statusClass}">${status}</span>
+                <span class="status-badge ${statusClass}">${badgeText}</span>
             </div>
             <div class="progress-container">
-                <div class="progress-bar" style="width: ${progress}%"></div>
+                <div class="progress-bar" style="width: ${progress}%">
+                    <div class="progress-fill" style="width: ${progress}%"></div>
+                </div>
             </div>
             <div class="status-details">
                 <div><strong>ID:</strong> ${id}</div>
@@ -183,6 +200,8 @@ function setupFilterButtons() {
     const statusCards = document.querySelectorAll('.status-card');
     
     filterButtons.forEach(button => {
+        // Prevent adding duplicate listeners across refreshes
+        if (button.dataset.listenerAttached === 'true') return;
         button.addEventListener('click', () => {
             // Remove active class from all buttons
             filterButtons.forEach(btn => btn.classList.remove('active'));
@@ -201,6 +220,7 @@ function setupFilterButtons() {
                 }
             });
         });
+        button.dataset.listenerAttached = 'true';
     });
 }
 
@@ -212,13 +232,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Setup filter buttons on initial load
+    // Setup filter buttons on initial load (avoid duplicate listeners)
     const filterButtons = document.querySelectorAll('.filter-btn');
     filterButtons.forEach(button => {
+        if (button.dataset.listenerAttached === 'true') return;
         button.addEventListener('click', function() {
             filterButtons.forEach(btn => btn.classList.remove('active'));
             this.classList.add('active');
         });
+        button.dataset.listenerAttached = 'true';
     });
     
     // Set "All" filter as active by default
