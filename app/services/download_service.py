@@ -504,3 +504,31 @@ class DownloadService:
         
         # Clear status registry
         self.download_status.clear()
+
+    def get_statistics(self):
+        """
+        Get download statistics.
+        
+        Returns:
+            dict: Statistics information including total downloads, completed, failed, etc.
+        """
+        total = len(self.download_status)
+        completed = 0
+        failed = 0
+        in_progress = 0
+        
+        for status in self.download_status.values():
+            status_value = status.get('status', 'unknown').lower()
+            if status_value in ['completed', 'finished']:
+                completed += 1
+            elif status_value in ['failed', 'error']:
+                failed += 1
+            elif status_value in ['downloading', 'starting', 'processing', 'in_progress']:
+                in_progress += 1
+        
+        return {
+            'total_downloads': total,
+            'completed_downloads': completed,
+            'failed_downloads': failed,
+            'in_progress_downloads': in_progress
+        }

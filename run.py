@@ -91,7 +91,17 @@ def main():
             print(f"❌ Error starting server: {e}")
             sys.exit(1)
     
-    return app
+    # Don't return app when running directly - it will be created for WSGI separately
 
 # Create the app instance for WSGI servers (Gunicorn)
-app = main()
+# Only create the app when this module is imported, don't run the server
+app = None
+
+if __name__ == '__main__':
+    main()
+else:
+    # When imported by WSGI server, create app without running server
+    config_name = os.environ.get('FLASK_ENV', 'production')
+    config_class = get_config(config_name)
+    setup_logging(config_class.LOG_LEVEL, config_class.LOG_FILE)
+    app = create_app(config_name)

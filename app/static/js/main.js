@@ -1,5 +1,26 @@
 let refreshInterval;
 
+// Show notification to user
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    
+    // Add to page
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        notification.classList.add('fade-out');
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
+}
+
 // Start a download
 function startDownload() {
     const url = document.getElementById('mediaUrl').value.trim();
@@ -7,6 +28,14 @@ function startDownload() {
     
     if (!url) {
         alert('Please enter a valid URL');
+        return;
+    }
+
+    // Basic URL validation
+    try {
+        new URL(url);
+    } catch (error) {
+        alert('Please enter a valid URL format');
         return;
     }
 
@@ -25,19 +54,31 @@ function startDownload() {
             },
             body: JSON.stringify({ url: url, cookies: cookiesContent })
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
                 document.getElementById('mediaUrl').value = '';
                 document.getElementById('cookieFile').value = '';
                 startRefreshing();
+                // Show success message
+                showNotification('Download started successfully!', 'success');
             } else {
-                alert('Error: ' + data.error);
+                const errorMessage = data.error || data.message || 'Unknown error occurred';
+                alert('Download failed: ' + errorMessage);
             }
         })
         .catch(error => {
-            console.error('Error:', error);
-            alert('Network error occurred');
+            console.error('Request failed:', error);
+            if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+                alert('Network connection failed. Please check your connection and try again.');
+            } else {
+                alert('Download failed: ' + error.message);
+            }
         })
         .finally(() => {
             downloadBtn.disabled = false;
@@ -50,6 +91,12 @@ function startDownload() {
         reader.onload = (e) => {
             sendRequest(e.target.result);
         };
+        reader.onerror = (error) => {
+            console.error('File reading error:', error);
+            alert('Failed to read cookie file');
+            downloadBtn.disabled = false;
+            spinner.style.display = 'none';
+        };
         reader.readAsText(cookieFile);
     } else {
         sendRequest(null);
@@ -61,10 +108,19 @@ function refreshDownloads() {
     fetch('/api/downloads')
         .then(response => response.json())
         .then(data => {
-            updateDownloadsList(data);
+            if (data.success && Array.isArray(data.data)) {
+                updateDownloadsList(data.data);
+            } else {
+                console.warn('Invalid response format:', data);
+                updateDownloadsList([]);
+            }
         })
         .catch(error => {
             console.error('Error fetching downloads:', error);
+            const downloadsContainer = document.getElementById('downloads-container');
+            if (downloadsContainer) {
+                downloadsContainer.innerHTML = '<div class="error-message">Failed to load downloads. Please refresh the page.</div>';
+            }
         });
 }
 
@@ -72,9 +128,8 @@ function refreshDownloads() {
 function updateDownloadsList(downloads) {
     const downloadsList = document.getElementById('downloadsList');
     
-    // Normalize API response: backend returns an array of download objects
-    const rawData = (downloads && downloads.data) ? downloads.data : [];
-    const items = Array.isArray(rawData) ? rawData : Object.values(rawData);
+    // The API returns {success: true, data: [...]} where data is the array of downloads
+    const items = Array.isArray(downloads) ? downloads : [];
 
     if (!items || items.length === 0) {
         downloadsList.innerHTML = `
@@ -89,10 +144,12 @@ function updateDownloadsList(downloads) {
         return;
     }
     
-    const html = items
+    const validItems = items.filter(download => download && typeof download === 'object' && download.id);
+    
+    const html = validItems
         .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
         // Use the real download.id from backend instead of array index
-        .map((download) => createDownloadCard(download.id || 'unknown', download))
+        .map((download) => createDownloadCard(download))
         .join('');
     
     downloadsList.innerHTML = html;
@@ -101,58 +158,92 @@ function updateDownloadsList(downloads) {
     setupFilterButtons();
 }
 
-// Create a download card
-function createDownloadCard(id, download) {
-    const rawProgress = typeof download.progress === 'number' ? download.progress : parseFloat(download.progress) || 0;
-    const progress = Math.max(0, Math.min(100, rawProgress));
-    const status = download.status || 'pending';
-    let statusClass = '';
-    let badgeText = '';
-    
-    // Map status to appropriate class and user-friendly badge text
-    switch(status) {
-        case 'completed':
-            statusClass = 'completed';
-            badgeText = 'COMPLETED';
-            break;
-        case 'in_progress':
-        case 'downloading':
-        case 'starting':
-        case 'processing':
-        case 'retrying':
-            statusClass = 'in-progress';
-            badgeText = 'IN PROGRESS';
-            break;
-        case 'error':
-        case 'failed':
-        case 'cancelled':
-            statusClass = 'error';
-            badgeText = 'FAILED';
-            break;
-        default:
-            statusClass = 'pending';
-            badgeText = 'PENDING';
+// Delete a download
+function deleteDownload(downloadId) {
+    if (!downloadId) {
+        console.error('Invalid download ID');
+        return;
     }
     
-    const message = download.message || 'No message available';
-    const url = download.url || 'No URL available';
-    const startTime = download.start_time ? new Date(download.start_time).toLocaleString() : 'Unknown';
+    if (confirm('Are you sure you want to delete this download?')) {
+        fetch(`/api/downloads/${downloadId}`, { method: 'DELETE' })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    refreshDownloads();
+                } else {
+                    alert('Failed to delete download: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting download:', error);
+                alert('Network error occurred while deleting download');
+            });
+    }
+}
+
+// Create a download card
+function createDownloadCard(download) {
+    // Validate required fields
+    if (!download || !download.id) {
+        console.error('Invalid download data:', download);
+        return '<div></div>'; // Return empty HTML string
+    }
     
+    // Normalize status to expected values
+    const status = download.status || 'pending';
+    const statusClass = status === 'completed' ? 'status-completed' : 
+                       status === 'error' || status === 'failed' ? 'status-error' : 'status-in-progress';
+    
+    // Safely get values with defaults
+    const progress = Math.max(0, Math.min(100, parseInt(download.progress) || 0));
+    const message = download.message || download.error || '';
+    const url = download.url || 'Unknown URL';
+    const filesDownloaded = download.files_downloaded || 0;
+    const totalFiles = download.total_files || 0;
+    
+    // Format dates safely
+    let startTime = 'N/A';
+    let endTime = null;
+    
+    try {
+        if (download.start_time) {
+            startTime = new Date(download.start_time).toLocaleString();
+        }
+        if (download.end_time) {
+            endTime = new Date(download.end_time).toLocaleString();
+        }
+    } catch (dateError) {
+        console.warn('Invalid date format in download:', download);
+    }
+    
+    // Return HTML string instead of DOM element
     return `
-        <div class="status-card" data-status="${statusClass}">
-            <div class="status-header">
-                <div class="status-title">${url}</div>
-                <span class="status-badge ${statusClass}">${badgeText}</span>
+        <div class="download-card" data-download-id="${download.id}" data-status="${status}">
+            <div class="download-header">
+                <h3 title="${url}">${url.length > 50 ? url.substring(0, 50) + '...' : url}</h3>
+                <span class="status-badge ${statusClass}">${status}</span>
             </div>
-            <div class="progress-container">
-                <div class="progress-bar" style="width: ${progress}%">
-                    <div class="progress-fill" style="width: ${progress}%"></div>
-                </div>
+            <div class="download-info">
+                <p><strong>Started:</strong> ${startTime}</p>
+                ${endTime ? `<p><strong>Completed:</strong> ${endTime}</p>` : ''}
+                <p><strong>Progress:</strong> ${progress}%</p>
+                ${totalFiles > 0 ? `<p><strong>Files:</strong> ${filesDownloaded}/${totalFiles}</p>` : ''}
+                ${message ? `<p><strong>Message:</strong> ${message}</p>` : ''}
             </div>
-            <div class="status-details">
-                <div><strong>ID:</strong> ${id}</div>
-                <div><strong>Message:</strong> ${message}</div>
-                <div><strong>Started:</strong> ${startTime}</div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${progress}%"></div>
+            </div>
+            <div class="download-actions">
+                <button class="btn btn-danger" onclick="deleteDownload('${download.id}')" 
+                        ${status === 'downloading' ? 'disabled title="Cannot delete while downloading"' : ''}>
+                    Delete
+                </button>
             </div>
         </div>
     `;
@@ -170,11 +261,11 @@ function startRefreshing() {
 
 // Clear download history
 function clearHistory() {
-    if (!confirm('Are you sure you want to clear the download history?')) {
+    if (!confirm('Are you sure you want to clear all completed downloads?')) {
         return;
     }
     
-    fetch('/api/clear-history', {
+    fetch('/api/downloads/clear', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -185,42 +276,49 @@ function clearHistory() {
         if (data.success) {
             refreshDownloads();
         } else {
-            alert('Error clearing history');
+            alert('Failed to clear history: ' + (data.message || 'Unknown error'));
         }
     })
     .catch(error => {
-        console.error('Error:', error);
-        alert('Network error occurred');
+        console.error('Error clearing history:', error);
+        alert('Network error occurred while clearing history');
     });
 }
 
 // Add filter functionality
 function setupFilterButtons() {
     const filterButtons = document.querySelectorAll('.filter-btn');
-    const statusCards = document.querySelectorAll('.status-card');
     
     filterButtons.forEach(button => {
         // Prevent adding duplicate listeners across refreshes
         if (button.dataset.listenerAttached === 'true') return;
-        button.addEventListener('click', () => {
+        
+        button.addEventListener('click', function() {
             // Remove active class from all buttons
             filterButtons.forEach(btn => btn.classList.remove('active'));
-            
             // Add active class to clicked button
-            button.classList.add('active');
+            this.classList.add('active');
             
-            const filter = button.getAttribute('data-filter');
-            
-            // Show/hide cards based on filter
-            statusCards.forEach(card => {
-                if (filter === 'all' || card.getAttribute('data-status') === filter) {
-                    card.style.display = 'block';
-                } else {
-                    card.style.display = 'none';
-                }
-            });
+            const filter = this.getAttribute('data-filter');
+            filterDownloads(filter);
         });
+        
         button.dataset.listenerAttached = 'true';
+    });
+}
+
+// Filter downloads based on status
+function filterDownloads(filter) {
+    const downloadCards = document.querySelectorAll('.download-card');
+    
+    downloadCards.forEach(card => {
+        const cardStatus = card.getAttribute('data-status');
+        
+        if (filter === 'all' || filter === cardStatus) {
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
     });
 }
 
@@ -232,16 +330,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Setup filter buttons on initial load (avoid duplicate listeners)
-    const filterButtons = document.querySelectorAll('.filter-btn');
-    filterButtons.forEach(button => {
-        if (button.dataset.listenerAttached === 'true') return;
-        button.addEventListener('click', function() {
-            filterButtons.forEach(btn => btn.classList.remove('active'));
-            this.classList.add('active');
-        });
-        button.dataset.listenerAttached = 'true';
-    });
+    // Setup filter buttons on initial load
+    setupFilterButtons();
     
     // Set "All" filter as active by default
     const allFilterBtn = document.querySelector('.filter-btn[data-filter="all"]');

@@ -314,6 +314,54 @@ input[type="url"]:focus, input[type="file"]:focus {
         transform: rotate(360deg);
     }}
 
+/* Error Messages */
+.error-message {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    padding: 15px;
+    margin: 20px 0;
+    text-align: center;
+}
+
+/* Notification System */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px 20px;
+    border-radius: 4px;
+    color: white;
+    font-weight: 500;
+    z-index: 1000;
+    max-width: 300px;
+    word-wrap: break-word;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: opacity 0.3s ease;
+}
+
+.notification-success {
+    background-color: #28a745;
+}
+
+.notification-error {
+    background-color: #dc3545;
+}
+
+.notification-info {
+    background-color: #17a2b8;
+}
+
+.notification-warning {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.notification.fade-out {
+    opacity: 0;
+}
+
 /* Responsive design */
 @media (max-width: 768px) {
     .container {
@@ -321,6 +369,7 @@ input[type="url"]:focus, input[type="file"]:focus {
         border-radius: 0;
         box-shadow: none;
         min-height: 100vh;
+        padding: 10px;
     }
     
     body {
@@ -341,6 +390,25 @@ input[type="url"]:focus, input[type="file"]:focus {
     
     .status-card {
         padding: 1rem;
+    }
+    
+    .status-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .status-badge {
+        align-self: flex-start;
+    }
+    
+    .status-actions {
+        justify-content: flex-start;
+    }
+    
+    .status-title {
+        word-break: break-all;
+        font-size: 14px;
     }
 }
 

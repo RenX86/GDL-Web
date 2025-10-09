@@ -1,0 +1,29 @@
+# Development dependencies
+pytest>=7.4.0
+pytest-flask>=1.2.0
+pytest-mock>=3.11.1
+pytest-cov>=4.1.0
+pytest-xdist>=3.3.1  # Parallel testing
+
+# Code quality
+flake8>=6.0.0
+autopep8>=2.0.2
+black>=23.7.0
+isort>=5.12.0
+mypy>=1.5.1
+
+# Security
+bandit>=1.7.5
+safety>=2.3.5
+
+# Documentation
+sphinx>=7.1.0
+sphinx-rtd-theme>=1.3.0
+
+# Performance profiling
+memory-profiler>=0.61.0
+line-profiler>=4.1.0
+
+# Development tools
+python-dotenv>=1.0.0
+watchdog>=3.0.0  # File watching for auto-reload
