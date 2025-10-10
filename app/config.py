@@ -89,7 +89,7 @@ class DevelopmentConfig(Config):
     @classmethod
     def _init_subclass_specific(cls, app: Flask) -> None:
         """Development-specific initialization"""
-        print(f"🔧 Development mode active")
+        print("🔧 Development mode active")
         print(f"📁 Downloads directory: {cls.DOWNLOADS_DIR}")
         print(f"🌐 Server will run on {cls.HOST}:{cls.PORT}")
 

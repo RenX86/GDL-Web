@@ -6,9 +6,8 @@ This module contains all API routes for the application.
 
 from flask import Blueprint, request, jsonify, current_app, Response
 from ..utils import handle_api_errors, validate_required_fields
-from ..models.download import Download, DownloadStatus
 from ..models.config import AppConfig
-from ..exceptions import ResourceNotFoundError, ValidationError
+from ..exceptions import ResourceNotFoundError
 import os
 
 # Create blueprint for API routes

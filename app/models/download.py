@@ -7,7 +7,7 @@ This module defines the Download model and related data structures.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 
 
 class DownloadStatus(Enum):

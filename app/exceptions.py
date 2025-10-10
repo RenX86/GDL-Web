@@ -12,7 +12,11 @@ class AppError(Exception):
 
     status_code = 500
 
-    def __init__(self, message: str = "An unexpected error occurred", status_code: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        message: str = "An unexpected error occurred",
+        status_code: Optional[int] = None,
+    ) -> None:
         self.message = message
         if status_code is not None:
             self.status_code = status_code

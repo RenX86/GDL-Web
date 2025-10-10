@@ -7,7 +7,6 @@ This module provides network-related utility functions for the download service.
 import socket
 import requests
 from urllib.parse import urlparse
-from typing import Any
 
 
 def check_network_connectivity() -> bool:

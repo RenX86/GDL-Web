@@ -4,9 +4,8 @@ Utility functions and decorators for the Flask application.
 
 from functools import wraps
 from flask import jsonify, current_app, request
-import logging
 from typing import Callable, Any, List
-from .exceptions import AppError, ValidationError, ResourceNotFoundError
+from .exceptions import AppError, ValidationError
 
 
 def handle_api_errors(f: Callable) -> Callable:

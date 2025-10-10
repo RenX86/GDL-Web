@@ -4,9 +4,7 @@ Download Service Adapter
 This module provides an adapter for the DownloadService to use the new data models.
 """
 
-from datetime import datetime
 from typing import Any, Optional, Dict, List, cast
-from ..models.download import Download, DownloadStatus
 
 
 class DownloadServiceAdapter:
@@ -36,7 +34,12 @@ class DownloadServiceAdapter:
         """
         return cast(bool, self._service.is_valid_url(url))
 
-    def start_download(self, url: str, output_dir: Optional[str] = None, cookies_content: Optional[str] = None) -> str:
+    def start_download(
+        self,
+        url: str,
+        output_dir: Optional[str] = None,
+        cookies_content: Optional[str] = None,
+    ) -> str:
         """
         Start a new download using the Download model.
 
@@ -60,7 +63,9 @@ class DownloadServiceAdapter:
         Returns:
             dict: Status information for the download
         """
-        status_dict = cast(Optional[Dict[str, Any]], self._service.get_download_status(download_id))
+        status_dict = cast(
+            Optional[Dict[str, Any]], self._service.get_download_status(download_id)
+        )
         if not status_dict:
             return None
 
@@ -105,7 +110,9 @@ class DownloadServiceAdapter:
         Returns:
             dict: Download information
         """
-        status_dict = cast(Optional[Dict[str, Any]], self._service.get_download_status(download_id))
+        status_dict = cast(
+            Optional[Dict[str, Any]], self._service.get_download_status(download_id)
+        )
         if not status_dict:
             return None
 

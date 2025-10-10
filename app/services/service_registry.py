@@ -5,8 +5,7 @@ This module provides a centralized registry for all application services,
 enabling proper dependency injection and service management.
 """
 
-from typing import Dict, Any, Callable, Optional
-from .download_service_adapter import DownloadServiceAdapter
+from typing import Dict, Any, Callable
 
 
 class ServiceRegistry:
@@ -33,7 +32,9 @@ class ServiceRegistry:
         """
         self._services[service_name] = service_instance
 
-    def register_factory(self, service_name: str, factory_func: Callable[[], Any]) -> None:
+    def register_factory(
+        self, service_name: str, factory_func: Callable[[], Any]
+    ) -> None:
         """
         Register a factory function for lazy service instantiation.
 

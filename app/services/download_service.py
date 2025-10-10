@@ -72,10 +72,12 @@ class DownloadService:
         try:
             result = urlparse(url)
             return all([result.scheme, result.netloc])
-        except:
+        except Exception:
             return False
 
-    def start_download(self, url: str, output_dir: str, cookies_content: Optional[str] = None) -> str:
+    def start_download(
+        self, url: str, output_dir: str, cookies_content: Optional[str] = None
+    ) -> str:
         """
         Start a new download and return download ID.
 
@@ -122,7 +124,13 @@ class DownloadService:
 
         return download_id
 
-    def _download_worker(self, download_id: str, url: str, output_dir: str, cookies_content: Optional[str] = None) -> None:
+    def _download_worker(  # noqa: C901
+        self,
+        download_id: str,
+        url: str,
+        output_dir: str,
+        cookies_content: Optional[str] = None,
+    ) -> None:
         """
         Background worker to handle the actual download with retry mechanism.
 
@@ -176,7 +184,8 @@ class DownloadService:
                         }
                     )
                     self.logger.info(
-                        f"Retrying download {download_id} (Attempt {retry_count}/{self.max_retries})"
+                        f"Retrying download {download_id} "
+                        f"(Attempt {retry_count}/{self.max_retries})"
                     )
                     # Wait before retrying
                     time.sleep(self.retry_delay * retry_count)  # Exponential backoff
@@ -232,7 +241,9 @@ class DownloadService:
                 # Execute gallery-dl with real-time output capture
                 # Log the command we're about to run (without exposing secrets)
                 self.logger.debug(
-                    f"Starting gallery-dl with command: {cmd} (cookies: {'yes' if cookies_content else 'no'})"
+                    "Starting gallery-dl with command: %s (cookies: %s)",
+                    cmd,
+                    "yes" if cookies_content else "no",
                 )
 
                 process = subprocess.Popen(
@@ -318,7 +329,9 @@ class DownloadService:
                         }
                     )
                     self.logger.info(
-                        f"Download {download_id} completed: {self.download_status[download_id].get('files_downloaded', 0)} files downloaded"
+                        "Download %s completed: %s files downloaded",
+                        download_id,
+                        self.download_status[download_id].get("files_downloaded", 0),
                     )
                     # Success, break out of retry loop
                     break
@@ -332,7 +345,9 @@ class DownloadService:
                     ):
                         if retry_count < self.max_retries:
                             self.logger.warning(
-                                f"Download {download_id} failed with retriable error: {error_message}"
+                                "Download %s failed with retriable error: %s",
+                                download_id,
+                                error_message,
                             )
                             last_error = error_message
                             retry_count += 1
@@ -349,7 +364,10 @@ class DownloadService:
                         }
                     )
                     self.logger.error(
-                        f"Download {download_id} failed: {error_message} (retry_count={retry_count})"
+                        "Download %s failed: %s (retry_count=%s)",
+                        download_id,
+                        error_message,
+                        retry_count,
                     )
                     break
 
@@ -373,7 +391,9 @@ class DownloadService:
                     }
                 )
                 self.logger.error(
-                    f"Download {download_id} failed with exception after retries: {str(e)}"
+                    "Download %s failed with exception after retries: %s",
+                    download_id,
+                    str(e),
                 )
 
                 # Clean up active process
@@ -381,15 +401,20 @@ class DownloadService:
                 break
 
         # If we've exhausted retries with network errors, provide a helpful message
-        if retry_count > self.max_retries and last_error and is_network_error(last_error):
+        if (
+            retry_count > self.max_retries
+            and last_error
+            and is_network_error(last_error)
+        ):
             self.download_status[download_id].update(
                 {
-                    "message": f"Download failed due to persistent network issues. Please check your internet connection and try again later.",
+                    "message": "Download failed due to persistent network issues. Please check your internet connection and try again later.",
                     "network_issue": True,
                 }
             )
             self.logger.warning(
-                f"Download {download_id} failed due to persistent network issues."
+                "Download %s failed due to persistent network issues.",
+                download_id,
             )
 
         # Clean up cookie files if they exist
@@ -402,7 +427,7 @@ class DownloadService:
             temp_cookie_path = os.path.join(self.cookies_dir, ".temp_cookies.txt")
             if os.path.exists(temp_cookie_path):
                 os.remove(temp_cookie_path)
-                self.logger.info(f"Removed temporary cookie file: {temp_cookie_path}")
+                self.logger.info("Removed temporary cookie file: %s", temp_cookie_path)
         except Exception as e:
             self.logger.error(f"Error removing cookie files: {str(e)}")
 
@@ -521,7 +546,9 @@ class DownloadService:
                     process.terminate()
                 except Exception as e:
                     self.logger.error(
-                        f"Error terminating process for {download_id}: {str(e)}"
+                        "Error terminating process for %s: %s",
+                        download_id,
+                        str(e),
                     )
                 finally:
                     self.active_processes.pop(download_id, None)
@@ -536,11 +563,13 @@ class DownloadService:
             if os.path.exists(enc_cookie_path):
                 os.remove(enc_cookie_path)
         except Exception as e:
-            self.logger.error(f"Error removing cookie file for {download_id}: {str(e)}")
+            self.logger.error(
+                "Error removing cookie file for %s: %s", download_id, str(e)
+            )
 
         return True
 
-    def clear_history(self) -> None:
+    def clear_history(self) -> None:  # noqa: C901
         """
         Clear all download history and cleanup resources.
         Terminates any active processes, removes cookie files related to downloads,
@@ -551,7 +580,7 @@ class DownloadService:
             try:
                 process.terminate()
             except Exception as e:
-                self.logger.error(f"Error terminating process for {did}: {str(e)}")
+                self.logger.error("Error terminating process for %s: %s", did, str(e))
         self.active_processes.clear()
 
         # Remove cookie files for known downloads
@@ -561,7 +590,7 @@ class DownloadService:
                 if os.path.exists(enc_cookie_path):
                     os.remove(enc_cookie_path)
             except Exception as e:
-                self.logger.error(f"Error removing cookie file for {did}: {str(e)}")
+                self.logger.error("Error removing cookie file for %s: %s", did, str(e))
 
         # Remove temporary cookie file if present
         try:
@@ -569,7 +598,7 @@ class DownloadService:
             if os.path.exists(temp_cookie_path):
                 os.remove(temp_cookie_path)
         except Exception as e:
-            self.logger.error(f"Error removing temp cookie file: {str(e)}")
+            self.logger.error("Error removing temp cookie file: %s", str(e))
 
         # Clear status registry
         self.download_status.clear()

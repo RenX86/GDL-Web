@@ -5,7 +5,7 @@ This module defines the AppConfig model for representing application configurati
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 
 @dataclass
