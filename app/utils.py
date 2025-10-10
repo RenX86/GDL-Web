@@ -5,10 +5,11 @@ Utility functions and decorators for the Flask application.
 from functools import wraps
 from flask import jsonify, current_app, request
 import logging
+from typing import Callable, Any, List
 from .exceptions import AppError, ValidationError, ResourceNotFoundError
 
 
-def handle_api_errors(f):
+def handle_api_errors(f: Callable) -> Callable:
     """
     Decorator to standardize error handling for API endpoints.
 
@@ -17,7 +18,7 @@ def handle_api_errors(f):
     """
 
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated_function(*args: Any, **kwargs: Any) -> Any:
         try:
             return f(*args, **kwargs)
         except AppError as e:
@@ -46,7 +47,7 @@ def handle_api_errors(f):
     return decorated_function
 
 
-def validate_required_fields(required_fields):
+def validate_required_fields(required_fields: List[str]) -> Callable:
     """
     Decorator to validate that required fields are present in the request JSON.
 
@@ -57,9 +58,9 @@ def validate_required_fields(required_fields):
         ValidationError: If any required field is missing
     """
 
-    def decorator(f):
+    def decorator(f: Callable) -> Callable:
         @wraps(f)
-        def decorated_function(*args, **kwargs):
+        def decorated_function(*args: Any, **kwargs: Any) -> Any:
             if not request.is_json:
                 raise ValidationError("Request must be JSON")
 

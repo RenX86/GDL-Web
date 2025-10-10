@@ -4,6 +4,7 @@ Services Package
 This package contains all service classes for the application.
 """
 
+from typing import Dict, Any
 from .service_registry import ServiceRegistry
 from .download_service import DownloadService
 from .cookie_manager import encrypt_cookies, decrypt_cookies
@@ -18,7 +19,7 @@ from .progress_parser import parse_progress, count_downloaded_files
 registry = ServiceRegistry()
 
 
-def create_download_service(config):
+def create_download_service(config: Dict[str, Any]) -> DownloadService:
     """
     Factory function to create a download service.
 

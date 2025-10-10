@@ -4,19 +4,21 @@ Custom Exceptions Module
 This module defines custom exceptions for better error handling throughout the application.
 """
 
+from typing import Optional
+
 
 class AppError(Exception):
     """Base exception class for all application errors"""
 
     status_code = 500
 
-    def __init__(self, message="An unexpected error occurred", status_code=None):
+    def __init__(self, message: str = "An unexpected error occurred", status_code: Optional[int] = None) -> None:
         self.message = message
         if status_code is not None:
             self.status_code = status_code
         super().__init__(self.message)
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         """Convert exception to dictionary for JSON response"""
         return {"success": False, "error": self.message}
 
@@ -26,7 +28,7 @@ class ResourceNotFoundError(AppError):
 
     status_code = 404
 
-    def __init__(self, message="Resource not found"):
+    def __init__(self, message: str = "Resource not found") -> None:
         super().__init__(message, self.status_code)
 
 
@@ -35,7 +37,7 @@ class ValidationError(AppError):
 
     status_code = 400
 
-    def __init__(self, message="Invalid input data"):
+    def __init__(self, message: str = "Invalid input data") -> None:
         super().__init__(message, self.status_code)
 
 
@@ -44,7 +46,7 @@ class PermissionError(AppError):
 
     status_code = 403
 
-    def __init__(self, message="Permission denied"):
+    def __init__(self, message: str = "Permission denied") -> None:
         super().__init__(message, self.status_code)
 
 
@@ -53,7 +55,7 @@ class DownloadError(AppError):
 
     status_code = 500
 
-    def __init__(self, message="Download operation failed"):
+    def __init__(self, message: str = "Download operation failed") -> None:
         super().__init__(message, self.status_code)
 
 
@@ -62,5 +64,5 @@ class NetworkError(AppError):
 
     status_code = 503
 
-    def __init__(self, message="Network operation failed"):
+    def __init__(self, message: str = "Network operation failed") -> None:
         super().__init__(message, self.status_code)

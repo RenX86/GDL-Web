@@ -7,9 +7,10 @@ This module provides network-related utility functions for the download service.
 import socket
 import requests
 from urllib.parse import urlparse
+from typing import Any
 
 
-def check_network_connectivity():
+def check_network_connectivity() -> bool:
     """
     Check if there is an active internet connection.
 
@@ -24,7 +25,7 @@ def check_network_connectivity():
         return False
 
 
-def check_url_accessibility(url):
+def check_url_accessibility(url: str) -> bool:
     """
     Check if the URL is accessible.
 
@@ -42,16 +43,16 @@ def check_url_accessibility(url):
         # Try to connect to the domain
         socket.create_connection((domain, 80), timeout=5)
         return True
-    except:
+    except Exception:
         # Try with a HEAD request as fallback
         try:
             response = requests.head(url, timeout=5, allow_redirects=True)
-            return response.status_code < 400
-        except:
+            return bool(response.status_code < 400)
+        except Exception:
             return False
 
 
-def is_network_error(error_message):
+def is_network_error(error_message: str) -> bool:
     """
     Check if the error is network-related.
 

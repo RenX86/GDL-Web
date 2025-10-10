@@ -11,6 +11,7 @@ import time
 import os
 import logging
 from datetime import datetime
+from typing import Optional, Dict, List, Any
 from .network_utils import (
     check_network_connectivity,
     check_url_accessibility,
@@ -28,7 +29,7 @@ class DownloadService:
     and provides methods to interact with the download functionality.
     """
 
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]) -> None:
         """
         Initialize the download service with configuration.
 
@@ -38,8 +39,8 @@ class DownloadService:
                 - COOKIES_DIR: Directory to store encrypted cookies
                 - COOKIES_ENCRYPTION_KEY: Key for cookie encryption/decryption
         """
-        self.download_status = {}
-        self.active_processes = {}
+        self.download_status: Dict[str, Dict[str, Any]] = {}
+        self.active_processes: Dict[str, Any] = {}
         self.config = config
         self.logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class DownloadService:
         # Initialize encryption key
         self.encryption_key = config.get("COOKIES_ENCRYPTION_KEY")
 
-    def is_valid_url(self, url):
+    def is_valid_url(self, url: str) -> bool:
         """
         Validate if the provided URL is valid.
 
@@ -74,7 +75,7 @@ class DownloadService:
         except:
             return False
 
-    def start_download(self, url, output_dir, cookies_content=None):
+    def start_download(self, url: str, output_dir: str, cookies_content: Optional[str] = None) -> str:
         """
         Start a new download and return download ID.
 
@@ -112,7 +113,7 @@ class DownloadService:
         thread.start()
 
         # Store encrypted cookies if provided
-        if cookies_content:
+        if cookies_content and self.encryption_key:
             cookie_file_name = f"{download_id}.txt"
             cookie_file_path = os.path.join(self.cookies_dir, cookie_file_name)
             encrypted_content = encrypt_cookies(cookies_content, self.encryption_key)
@@ -121,7 +122,7 @@ class DownloadService:
 
         return download_id
 
-    def _download_worker(self, download_id, url, output_dir, cookies_content=None):
+    def _download_worker(self, download_id: str, url: str, output_dir: str, cookies_content: Optional[str] = None) -> None:
         """
         Background worker to handle the actual download with retry mechanism.
 
@@ -204,7 +205,7 @@ class DownloadService:
                 cmd.extend(["-D", output_dir])
                 cmd.append("--verbose")
 
-                if cookies_content:
+                if cookies_content and self.encryption_key:
                     # Use the secure cookie file that was already created
                     if cookie_file_path and os.path.exists(cookie_file_path):
                         # Read and decrypt the cookie content
@@ -380,7 +381,7 @@ class DownloadService:
                 break
 
         # If we've exhausted retries with network errors, provide a helpful message
-        if retry_count > self.max_retries and is_network_error(last_error):
+        if retry_count > self.max_retries and last_error and is_network_error(last_error):
             self.download_status[download_id].update(
                 {
                     "message": f"Download failed due to persistent network issues. Please check your internet connection and try again later.",
@@ -405,7 +406,7 @@ class DownloadService:
         except Exception as e:
             self.logger.error(f"Error removing cookie files: {str(e)}")
 
-    def _is_retriable_error(self, error_message):
+    def _is_retriable_error(self, error_message: str) -> bool:
         """
         Determine if an error should trigger a retry.
 
@@ -441,7 +442,7 @@ class DownloadService:
 
         return any(pattern in error_message.lower() for pattern in retriable_patterns)
 
-    def get_download_status(self, download_id):
+    def get_download_status(self, download_id: str) -> Optional[Dict[str, Any]]:
         """
         Get the current status of a download.
 
@@ -453,7 +454,7 @@ class DownloadService:
         """
         return self.download_status.get(download_id)
 
-    def cancel_download(self, download_id):
+    def cancel_download(self, download_id: str) -> bool:
         """
         Cancel an active download.
 
@@ -480,7 +481,7 @@ class DownloadService:
                 return False
         return False
 
-    def get_all_downloads(self):
+    def get_all_downloads(self) -> List[Dict[str, Any]]:
         """
         Get status of all downloads.
 
@@ -489,7 +490,7 @@ class DownloadService:
         """
         return list(self.download_status.values())
 
-    def download_exists(self, download_id):
+    def download_exists(self, download_id: str) -> bool:
         """
         Check if a download exists in the service.
 
@@ -501,7 +502,7 @@ class DownloadService:
         """
         return download_id in self.download_status
 
-    def delete_download(self, download_id):
+    def delete_download(self, download_id: str) -> bool:
         """
         Delete a download entry and clean up related resources.
         If the download is active, attempt to terminate the process first.
@@ -515,14 +516,15 @@ class DownloadService:
         # Terminate active process if any
         if download_id in self.active_processes:
             process = self.active_processes.get(download_id)
-            try:
-                process.terminate()
-            except Exception as e:
-                self.logger.error(
-                    f"Error terminating process for {download_id}: {str(e)}"
-                )
-            finally:
-                self.active_processes.pop(download_id, None)
+            if process:
+                try:
+                    process.terminate()
+                except Exception as e:
+                    self.logger.error(
+                        f"Error terminating process for {download_id}: {str(e)}"
+                    )
+                finally:
+                    self.active_processes.pop(download_id, None)
 
         # Remove status entry
         if download_id in self.download_status:
@@ -538,7 +540,7 @@ class DownloadService:
 
         return True
 
-    def clear_history(self):
+    def clear_history(self) -> None:
         """
         Clear all download history and cleanup resources.
         Terminates any active processes, removes cookie files related to downloads,
@@ -572,7 +574,7 @@ class DownloadService:
         # Clear status registry
         self.download_status.clear()
 
-    def get_statistics(self):
+    def get_statistics(self) -> Dict[str, Any]:
         """
         Get download statistics.
 

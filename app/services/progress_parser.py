@@ -5,7 +5,7 @@ This module provides functions for parsing gallery-dl output to extract progress
 """
 
 
-def parse_progress(download_status, download_id, line):
+def parse_progress(download_status: dict, download_id: str, line: str) -> None:
     """
     Parse gallery-dl output to extract progress information.
 
@@ -34,7 +34,7 @@ def parse_progress(download_status, download_id, line):
         logger.debug(f"Progress parsing error for download {download_id}: {str(e)}")
 
 
-def count_downloaded_files(stdout_lines):
+def count_downloaded_files(stdout_lines: list) -> int:
     """
     Count the number of files downloaded based on gallery-dl output.
 

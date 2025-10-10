@@ -4,7 +4,7 @@ API Routes Module
 This module contains all API routes for the application.
 """
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, Response
 from ..utils import handle_api_errors, validate_required_fields
 from ..models.download import Download, DownloadStatus
 from ..models.config import AppConfig
@@ -18,14 +18,14 @@ api_bp = Blueprint("api", __name__)
 @api_bp.route("/download", methods=["POST"])
 @handle_api_errors
 @validate_required_fields(["url"])
-def start_download():
+def start_download() -> Response:
     """Start a new media download"""
     data = request.get_json()
     url = data.get("url")
     cookies_content = data.get("cookies")
 
     # Get download service from registry
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore  # type: ignore  # type: ignore
 
     # Validate URL format
     if not download_service.is_valid_url(url):
@@ -47,9 +47,9 @@ def start_download():
 
 @api_bp.route("/status/<download_id>", methods=["GET"])
 @handle_api_errors
-def get_download_status(download_id):
+def get_download_status(download_id: str) -> Response:
     """Get status of a specific download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -84,9 +84,9 @@ def get_download_status(download_id):
 
 @api_bp.route("/downloads", methods=["GET"])
 @handle_api_errors
-def list_all_downloads():
+def list_all_downloads() -> Response:
     """List all downloads"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
     downloads = download_service.list_all_downloads()
 
     # Ensure consistent data structure with all required fields
@@ -119,9 +119,9 @@ def list_all_downloads():
 
 @api_bp.route("/downloads/<download_id>", methods=["DELETE"])
 @handle_api_errors
-def delete_download(download_id):
+def delete_download(download_id: str) -> Response:
     """Delete a specific download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -135,9 +135,9 @@ def delete_download(download_id):
 
 @api_bp.route("/clear-history", methods=["POST"])
 @handle_api_errors
-def clear_download_history():
+def clear_download_history() -> Response:
     """Clear all download history"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
     download_service.clear_history()
 
     return jsonify(
@@ -147,9 +147,9 @@ def clear_download_history():
 
 @api_bp.route("/cancel/<download_id>", methods=["POST"])
 @handle_api_errors
-def cancel_download(download_id):
+def cancel_download(download_id: str) -> Response:
     """Cancel an active download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -163,9 +163,9 @@ def cancel_download(download_id):
 
 @api_bp.route("/stats")
 @handle_api_errors
-def get_statistics():
+def get_statistics() -> Response:
     """Get download statistics"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
     stats = download_service.get_statistics()
 
     return jsonify({"success": True, "data": stats})
@@ -173,7 +173,7 @@ def get_statistics():
 
 @api_bp.route("/config")
 @handle_api_errors
-def get_app_config():
+def get_app_config() -> Response:
     """Get relevant app configuration for frontend"""
     app_config = AppConfig(
         max_file_size=current_app.config["MAX_CONTENT_LENGTH"],

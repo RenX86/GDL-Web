@@ -5,6 +5,7 @@ This module provides an adapter for the DownloadService to use the new data mode
 """
 
 from datetime import datetime
+from typing import Any, Optional, Dict, List, cast
 from ..models.download import Download, DownloadStatus
 
 
@@ -14,7 +15,7 @@ class DownloadServiceAdapter:
     This provides a clean interface between the service layer and the API layer.
     """
 
-    def __init__(self, download_service):
+    def __init__(self, download_service: Any) -> None:
         """
         Initialize the adapter with a download service instance.
 
@@ -23,7 +24,7 @@ class DownloadServiceAdapter:
         """
         self._service = download_service
 
-    def is_valid_url(self, url):
+    def is_valid_url(self, url: str) -> bool:
         """
         Validate if the provided URL is valid.
 
@@ -33,9 +34,9 @@ class DownloadServiceAdapter:
         Returns:
             bool: True if URL is valid, False otherwise
         """
-        return self._service.is_valid_url(url)
+        return cast(bool, self._service.is_valid_url(url))
 
-    def start_download(self, url, output_dir=None, cookies_content=None):
+    def start_download(self, url: str, output_dir: Optional[str] = None, cookies_content: Optional[str] = None) -> str:
         """
         Start a new download using the Download model.
 
@@ -47,9 +48,9 @@ class DownloadServiceAdapter:
         Returns:
             str: Unique download ID for tracking
         """
-        return self._service.start_download(url, output_dir, cookies_content)
+        return cast(str, self._service.start_download(url, output_dir, cookies_content))
 
-    def get_download_status(self, download_id):
+    def get_download_status(self, download_id: str) -> Optional[Dict[str, Any]]:
         """
         Get the status of a download using the Download model.
 
@@ -59,7 +60,7 @@ class DownloadServiceAdapter:
         Returns:
             dict: Status information for the download
         """
-        status_dict = self._service.get_download_status(download_id)
+        status_dict = cast(Optional[Dict[str, Any]], self._service.get_download_status(download_id))
         if not status_dict:
             return None
 
@@ -94,7 +95,7 @@ class DownloadServiceAdapter:
 
         return status_dict
 
-    def get_download(self, download_id):
+    def get_download(self, download_id: str) -> Optional[Dict[str, Any]]:
         """
         Get a download as a Download model.
 
@@ -104,22 +105,22 @@ class DownloadServiceAdapter:
         Returns:
             dict: Download information
         """
-        status_dict = self._service.get_download_status(download_id)
+        status_dict = cast(Optional[Dict[str, Any]], self._service.get_download_status(download_id))
         if not status_dict:
             return None
 
         return status_dict
 
-    def list_all_downloads(self):
+    def list_all_downloads(self) -> List[Dict[str, Any]]:
         """
         Get all downloads as Download models.
 
         Returns:
             list: List of all downloads
         """
-        return self._service.get_all_downloads()
+        return cast(List[Dict[str, Any]], self._service.get_all_downloads())
 
-    def download_exists(self, download_id):
+    def download_exists(self, download_id: str) -> bool:
         """
         Check if a download exists.
 
@@ -129,9 +130,9 @@ class DownloadServiceAdapter:
         Returns:
             bool: True if the download exists, False otherwise
         """
-        return self._service.download_exists(download_id)
+        return cast(bool, self._service.download_exists(download_id))
 
-    def cancel_download(self, download_id):
+    def cancel_download(self, download_id: str) -> None:
         """
         Cancel a download.
 
@@ -140,7 +141,7 @@ class DownloadServiceAdapter:
         """
         self._service.cancel_download(download_id)
 
-    def delete_download(self, download_id):
+    def delete_download(self, download_id: str) -> None:
         """
         Delete a download.
 
@@ -149,17 +150,17 @@ class DownloadServiceAdapter:
         """
         self._service.delete_download(download_id)
 
-    def clear_history(self):
+    def clear_history(self) -> None:
         """
         Clear all download history.
         """
         self._service.clear_history()
 
-    def get_statistics(self):
+    def get_statistics(self) -> Dict[str, Any]:
         """
         Get download statistics.
 
         Returns:
             dict: Statistics information
         """
-        return self._service.get_statistics()
+        return cast(Dict[str, Any], self._service.get_statistics())

@@ -3,6 +3,8 @@ import os
 import secrets
 from pathlib import Path
 from dotenv import load_dotenv
+from flask import Flask
+from typing import Any, Optional
 
 # Load environment variables from .env file
 load_dotenv()
@@ -50,7 +52,7 @@ class Config:
     TESTING = False
 
     @classmethod
-    def init_app(cls, app):
+    def init_app(cls, app: Flask) -> None:
         """Initialize application with this config"""
         # Create downloads directory
         Path(cls.DOWNLOADS_DIR).mkdir(exist_ok=True)
@@ -74,7 +76,7 @@ class Config:
         )
 
         # Call subclass-specific initialization
-        cls._init_subclass_specific(app)
+        cls._init_subclass_specific(app)  # type: ignore
 
 
 class DevelopmentConfig(Config):
@@ -85,7 +87,7 @@ class DevelopmentConfig(Config):
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG")
 
     @classmethod
-    def _init_subclass_specific(cls, app):
+    def _init_subclass_specific(cls, app: Flask) -> None:
         """Development-specific initialization"""
         print(f"🔧 Development mode active")
         print(f"📁 Downloads directory: {cls.DOWNLOADS_DIR}")
@@ -97,7 +99,7 @@ class ProductionConfig(Config):
 
     DEBUG = False
     TESTING = False
-    SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32)
+    SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING")
 
     # Production security headers
@@ -108,12 +110,12 @@ class ProductionConfig(Config):
     }
 
     @classmethod
-    def _init_subclass_specific(cls, app):
+    def _init_subclass_specific(cls, app: Flask) -> None:
         """Production-specific initialization"""
 
         # Add security headers middleware
         @app.after_request
-        def set_security_headers(response):
+        def set_security_headers(response: Any) -> Any:
             for header, value in cls.SECURITY_HEADERS.items():
                 response.headers[header] = value
             return response
@@ -127,7 +129,7 @@ class TestingConfig(Config):
     DOWNLOADS_DIR = os.path.join(os.getcwd(), "test_downloads")
 
     @classmethod
-    def _init_subclass_specific(cls, app):
+    def _init_subclass_specific(cls, app: Flask) -> None:
         """Testing-specific initialization"""
         pass
 
@@ -141,7 +143,7 @@ config = {
 }
 
 
-def get_config(config_name=None):
+def get_config(config_name: Optional[str] = None) -> type:
     """Get configuration class by name"""
     if config_name is None:
         config_name = os.environ.get("FLASK_ENV", "development")

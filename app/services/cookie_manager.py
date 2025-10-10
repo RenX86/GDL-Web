@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet
 logger = logging.getLogger(__name__)
 
 
-def encrypt_cookies(cookies_content, encryption_key):
+def encrypt_cookies(cookies_content: str, encryption_key: str) -> str:
     """
     Encrypt cookies content using Fernet symmetric encryption.
 
@@ -33,7 +33,7 @@ def encrypt_cookies(cookies_content, encryption_key):
         return cookies_content
 
 
-def decrypt_cookies(encrypted_content, encryption_key):
+def decrypt_cookies(encrypted_content: str, encryption_key: str) -> str:
     """
     Decrypt cookies content using Fernet symmetric encryption.
 

@@ -5,6 +5,7 @@ This module provides a centralized registry for all application services,
 enabling proper dependency injection and service management.
 """
 
+from typing import Dict, Any, Callable, Optional
 from .download_service_adapter import DownloadServiceAdapter
 
 
@@ -17,12 +18,12 @@ class ServiceRegistry:
     testability through service mocking.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize an empty service registry."""
-        self._services = {}
-        self._factories = {}
+        self._services: Dict[str, Any] = {}
+        self._factories: Dict[str, Callable[[], Any]] = {}
 
-    def register(self, service_name, service_instance):
+    def register(self, service_name: str, service_instance: Any) -> None:
         """
         Register a service instance with the registry.
 
@@ -32,7 +33,7 @@ class ServiceRegistry:
         """
         self._services[service_name] = service_instance
 
-    def register_factory(self, service_name, factory_func):
+    def register_factory(self, service_name: str, factory_func: Callable[[], Any]) -> None:
         """
         Register a factory function for lazy service instantiation.
 
@@ -42,7 +43,7 @@ class ServiceRegistry:
         """
         self._factories[service_name] = factory_func
 
-    def get(self, service_name):
+    def get(self, service_name: str) -> Any:
         """
         Get a service instance by name.
 
@@ -71,7 +72,7 @@ class ServiceRegistry:
 
         raise KeyError(f"Service '{service_name}' not registered")
 
-    def has(self, service_name):
+    def has(self, service_name: str) -> bool:
         """
         Check if a service is registered.
 
@@ -83,12 +84,12 @@ class ServiceRegistry:
         """
         return service_name in self._services or service_name in self._factories
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all registered services and factories."""
         self._services.clear()
         self._factories.clear()
 
-    def wrap_with_adapter(self, service_name, adapter_class):
+    def wrap_with_adapter(self, service_name: str, adapter_class: type) -> Any:
         """
         Wrap an existing service with an adapter.
 

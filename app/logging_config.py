@@ -9,9 +9,10 @@ import os
 import sys
 import logging
 from pathlib import Path
+from typing import Optional
 
 
-def setup_logging(log_level="INFO", log_file="app.log"):
+def setup_logging(log_level: str = "INFO", log_file: str = "app.log") -> logging.Logger:
     """
     Configure logging for the application.
 
@@ -49,7 +50,7 @@ def setup_logging(log_level="INFO", log_file="app.log"):
     return logging.getLogger(__name__)
 
 
-def get_logger(name=None):
+def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     Get a logger instance with the specified name.
 
