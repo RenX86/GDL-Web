@@ -31,9 +31,16 @@ class Config:
     )
     COOKIES_ENCRYPTION_KEY = os.environ.get("COOKIES_ENCRYPTION_KEY")
     if not COOKIES_ENCRYPTION_KEY:
-        raise ValueError(
-            "No COOKIES_ENCRYPTION_KEY set for Flask application. Please set it in your environment."
-        )
+        # Generate a default key for development/testing, but warn about it
+        if os.environ.get("FLASK_ENV") in ["development", "testing"]:
+            COOKIES_ENCRYPTION_KEY = secrets.token_hex(32)
+            print(
+                "⚠️  WARNING: Using generated encryption key for cookies. Set COOKIES_ENCRYPTION_KEY for production."
+            )
+        else:
+            raise ValueError(
+                "No COOKIES_ENCRYPTION_KEY set for Flask application. Please set it in your environment."
+            )
 
     # Logging Configuration
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
