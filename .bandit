@@ -1,0 +1,6 @@
+[bandit]
+exclude_dirs = tests
+skips = B404,B603
+
+# B404: subprocess module import - This is informational and we're using it safely
+# B603: subprocess call with shell=False - We're already sanitizing inputs with shlex.quote

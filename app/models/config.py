@@ -13,19 +13,20 @@ class AppConfig:
     """
     Model representing application configuration for the frontend.
     """
+
     max_file_size: int
     downloads_dir: str
     debug_mode: bool
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert the config object to a dictionary for serialization.
-        
+
         Returns:
             Dict[str, Any]: Dictionary representation of the config
         """
         return {
             "max_file_size": self.max_file_size,
             "downloads_dir": self.downloads_dir,
-            "debug_mode": self.debug_mode
+            "debug_mode": self.debug_mode,
         }

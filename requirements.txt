@@ -1,4 +1,4 @@
-Flask==3.1.2
+Flask==3.0.3
 gallery-dl==1.30.8
 python-dotenv==1.1.1
 gunicorn==23.0.0

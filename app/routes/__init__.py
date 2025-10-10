@@ -9,4 +9,4 @@ from .api import api_bp
 from .web import main_bp
 
 # Export blueprints
-__all__ = ['api_bp', 'main_bp']
+__all__ = ["api_bp", "main_bp"]

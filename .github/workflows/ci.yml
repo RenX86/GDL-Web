@@ -86,4 +86,4 @@ jobs:
     
     - name: Run bandit security check
       run: |
-        bandit -r app/ -f json
+        bandit -r app/ -f json --skip B404,B603
