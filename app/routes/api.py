@@ -4,10 +4,10 @@ API Routes Module
 This module contains all API routes for the application.
 """
 
-from flask import Blueprint, request, jsonify, current_app, Response
-from ..utils import handle_api_errors, validate_required_fields
+from flask import Blueprint, request, jsonify, current_app, Response, send_file
+from ..utils import handle_api_errors, validate_required_fields, secure_file_serve, list_directory_contents, get_file_info, format_file_size, is_safe_path
 from ..models.config import AppConfig
-from ..exceptions import ResourceNotFoundError
+from ..exceptions import ResourceNotFoundError, ValidationError
 import os
 
 # Create blueprint for API routes
@@ -181,3 +181,116 @@ def get_app_config() -> Response:
     )
 
     return jsonify({"success": True, "data": app_config.to_dict()})
+
+
+@api_bp.route("/files/<download_id>", methods=["GET"])
+@handle_api_errors
+def list_download_files(download_id: str) -> Response:
+    """List all files for a specific download"""
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
+
+    if not download_service.download_exists(download_id):
+        raise ResourceNotFoundError(f"Download with ID {download_id} not found")
+
+    # Get download status to find the output directory
+    status = download_service.get_download_status(download_id)
+    if not status or not isinstance(status, dict):
+        raise ResourceNotFoundError(f"Download status not available for {download_id}")
+
+    # Get the output directory for this download
+    output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
+    
+    # Create a specific directory for this download if it doesn't exist
+    download_dir = os.path.join(output_dir, download_id)
+    
+    # If the specific download directory doesn't exist, try to find files in the main downloads directory
+    if not os.path.exists(download_dir):
+        # Try to find files that might be related to this download
+        files = []
+        if os.path.exists(output_dir):
+            # Look for files that might be related to this download
+            all_files = list_directory_contents(output_dir, recursive=True)
+            # Filter files that might belong to this download (based on timestamp or other criteria)
+            # For now, return all files in the downloads directory
+            files = all_files
+    else:
+        files = list_directory_contents(download_dir, recursive=True)
+
+    # Format file information for frontend
+    formatted_files = []
+    for file_info in files:
+        formatted_files.append({
+            "name": file_info["name"],
+            "size": format_file_size(file_info["size"]),
+            "size_bytes": file_info["size"],
+            "type": file_info["mime_type"],
+            "extension": file_info["extension"],
+            "modified": file_info["modified"],
+            "download_url": f"/api/download-file/{download_id}/{file_info['name']}" if file_info["is_file"] else None
+        })
+
+    return jsonify({
+        "success": True,
+        "download_id": download_id,
+        "files": formatted_files,
+        "total_files": len(formatted_files)
+    })
+
+
+@api_bp.route("/download-file/<download_id>/<path:filename>", methods=["GET"])
+@handle_api_errors
+def download_file(download_id: str, filename: str) -> Response:
+    """Download a specific file from a completed download"""
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
+
+    if not download_service.download_exists(download_id):
+        raise ResourceNotFoundError(f"Download with ID {download_id} not found")
+
+    # Get download status
+    status = download_service.get_download_status(download_id)
+    if not status or not isinstance(status, dict):
+        raise ResourceNotFoundError(f"Download status not available for {download_id}")
+
+    # Check if download is completed
+    download_status = status.get("status", "").lower()
+    if download_status not in ["completed", "finished"]:
+        raise ValidationError(f"Download must be completed before files can be accessed. Current status: {download_status}")
+
+    # Get the absolute path to downloads directory
+    downloads_dir = os.path.abspath(current_app.config["DOWNLOADS_DIR"])
+    
+    # Look for the file in the download-specific directory first
+    download_dir = os.path.join(downloads_dir, download_id)
+    file_path = None
+    
+    # Check in download-specific directory
+    if os.path.exists(download_dir):
+        potential_path = os.path.join(download_dir, filename)
+        if os.path.exists(potential_path) and os.path.isfile(potential_path):
+            file_path = potential_path
+    
+    # If not found in specific directory, search in the main downloads directory
+    if not file_path and os.path.exists(downloads_dir):
+        # Search recursively for the file
+        for root, dirs, files in os.walk(downloads_dir):
+            if filename in files:
+                potential_path = os.path.join(root, filename)
+                if os.path.isfile(potential_path):
+                    file_path = potential_path
+                    break
+    
+    if not file_path:
+        raise ResourceNotFoundError(f"File '{filename}' not found for download {download_id}")
+
+    # Security check: ensure file is within the allowed downloads directory
+    if not is_safe_path(downloads_dir, file_path):
+        raise ValidationError("Access denied: file path outside allowed directory")
+    
+    # Debug: Print the paths being used
+    print(f"DEBUG: file_path={file_path}")
+    print(f"DEBUG: downloads_dir={downloads_dir}")
+    print(f"DEBUG: filename={filename}")
+    print(f"DEBUG: download_dir={download_dir}")
+    
+    # Serve the file securely
+    return secure_file_serve(file_path, downloads_dir, filename)

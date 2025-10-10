@@ -240,7 +240,8 @@ function createDownloadCard(download) {
                 <div class="progress-fill" style="width: ${progress}%"></div>
             </div>
             <div class="download-actions">
-                <button class="btn btn-danger" onclick="deleteDownload('${download.id}')" 
+                ${status === 'completed' ? `<button class="btn download-btn" onclick="showDownloadFiles('${download.id}')">View Files</button>` : ''}
+                <button class="btn download-btn" onclick="deleteDownload('${download.id}')" 
                         ${status === 'downloading' ? 'disabled title="Cannot delete while downloading"' : ''}>
                     Delete
                 </button>
@@ -320,6 +321,178 @@ function filterDownloads(filter) {
             card.style.display = 'none';
         }
     });
+}
+
+// Show files for a completed download
+function showDownloadFiles(downloadId) {
+    if (!downloadId) {
+        console.error('Invalid download ID');
+        return;
+    }
+
+    fetch(`/api/files/${downloadId}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success && data.files) {
+                displayDownloadFiles(downloadId, data.files);
+            } else {
+                alert('Failed to load files: ' + (data.message || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching files:', error);
+            alert('Failed to load files: ' + error.message);
+        });
+}
+
+// Display download files in a modal or popup
+function displayDownloadFiles(downloadId, files) {
+    // Create modal overlay
+    const modal = document.createElement('div');
+    modal.className = 'file-modal-overlay';
+    modal.innerHTML = `
+        <div class="file-modal">
+            <div class="file-modal-header">
+                <h3>Downloaded Files</h3>
+                <button class="close-btn" onclick="this.closest('.file-modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="file-modal-content">
+                ${files.length === 0 ? 
+                    '<p class="no-files">No files found for this download.</p>' :
+                    `<div class="file-list">
+                        ${files.map(file => `
+                            <div class="file-item">
+                                <div class="file-info">
+                                    <span class="file-name">${file.name}</span>
+                                    <span class="file-size">${file.size}</span>
+                                </div>
+                                <button class="btn download-btn" 
+                                        onclick="downloadFile('${downloadId}', '${file.name}')">
+                                    Download
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>`
+                }
+            </div>
+        </div>
+    `;
+    
+    // Add modal styles if not already present
+    if (!document.getElementById('modal-styles')) {
+        const style = document.createElement('style');
+        style.id = 'modal-styles';
+        style.textContent = `
+            .file-modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            }
+            .file-modal {
+                background: white;
+                border-radius: 8px;
+                width: 90%;
+                max-width: 600px;
+                max-height: 80vh;
+                overflow: hidden;
+            }
+            .file-modal-header {
+                padding: 20px;
+                border-bottom: 1px solid #eee;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .file-modal-header h3 {
+                margin: 0;
+            }
+            .close-btn {
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                color: #666;
+            }
+            .file-modal-content {
+                padding: 20px;
+                max-height: calc(80vh - 100px);
+                overflow-y: auto;
+            }
+            .file-list {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .file-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 10px;
+                border: 1px solid #eee;
+                border-radius: 4px;
+            }
+            .file-info {
+                display: flex;
+                flex-direction: column;
+            }
+            .file-name {
+                font-weight: 500;
+                margin-bottom: 2px;
+            }
+            .file-size {
+                font-size: 12px;
+                color: #666;
+            }
+            .no-files {
+                text-align: center;
+                color: #666;
+                margin: 20px 0;
+            }
+            .file-modal .download-btn {
+                padding: 5px 10px;
+                font-size: 12px;
+                width: auto;
+                height: auto;
+                min-width: 80px;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(modal);
+}
+
+// Download a specific file
+function downloadFile(downloadId, filename) {
+    if (!downloadId || !filename) {
+        console.error('Invalid download ID or filename');
+        return;
+    }
+
+    // Create a download link and trigger it
+    const downloadUrl = `/api/download-file/${downloadId}/${filename}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename; // This will suggest the filename to the browser
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showNotification(`Downloading ${filename}...`, 'info');
 }
 
 // Allow Enter key to start download

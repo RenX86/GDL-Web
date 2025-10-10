@@ -517,4 +517,4 @@ input[type="url"]:focus, input[type="file"]:focus {
     padding: 30px;
     color: #6c757d;
     font-style: italic;
-}
+}.download-actions .download-btn { padding: 5px 10px; font-size: 12px; width: auto; height: auto; min-width: 80px; }
