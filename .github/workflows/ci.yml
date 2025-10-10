@@ -9,7 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         python-version: [3.8, 3.9, "3.10", "3.11"]
 
@@ -30,10 +32,11 @@ jobs:
           ${{ runner.os }}-pip-
     
     - name: Install dependencies
+      timeout-minutes: 10
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov flake8 black mypy
+        python -m pip install --upgrade pip setuptools wheel
+        pip install --no-cache-dir --timeout 300 pytest pytest-cov flake8 black mypy
+        pip install --no-cache-dir --timeout 300 -r requirements.txt
     
     - name: Lint with flake8
       run: |
@@ -61,6 +64,7 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
     
@@ -70,10 +74,11 @@ jobs:
         python-version: "3.11"
     
     - name: Install dependencies
+      timeout-minutes: 10
       run: |
-        python -m pip install --upgrade pip
-        pip install safety bandit
-        pip install -r requirements.txt
+        python -m pip install --upgrade pip setuptools wheel
+        pip install --no-cache-dir --timeout 300 safety bandit
+        pip install --no-cache-dir --timeout 300 -r requirements.txt
     
     - name: Run safety check
       run: |

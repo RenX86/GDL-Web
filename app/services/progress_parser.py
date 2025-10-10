@@ -25,8 +25,11 @@ def parse_progress(download_status, download_id, line):
             elif 'processing' in line.lower():
                 download_status[download_id]['message'] = 'Processing files...'
                 download_status[download_id]['progress'] = 50
-    except:
-        pass  # Ignore parsing errors
+    except (KeyError, IndexError, TypeError, AttributeError) as e:
+        # Log parsing errors for debugging but don't crash the download
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Progress parsing error for download {download_id}: {str(e)}")
 
 def count_downloaded_files(stdout_lines):
     """

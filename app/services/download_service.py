@@ -200,14 +200,17 @@ class DownloadService:
                             f.write(decrypted_content)
                         cmd.extend(['--cookies', temp_cookie_path])
 
-                cmd.append(url)
+                # Sanitize URL to prevent OS command injection
+                import shlex
+                sanitized_url = shlex.quote(url)
+                cmd.append(sanitized_url)
                 
                 # Execute gallery-dl with real-time output capture
                 # Log the command we're about to run (without exposing secrets)
                 self.logger.debug(f"Starting gallery-dl with command: {cmd} (cookies: {'yes' if cookies_content else 'no'})")
                 
                 process = subprocess.Popen(
-                    cmd + [url],
+                    cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
