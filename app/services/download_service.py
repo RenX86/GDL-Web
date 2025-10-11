@@ -39,6 +39,8 @@ class DownloadService:
                 - COOKIES_DIR: Directory to store encrypted cookies
                 - COOKIES_ENCRYPTION_KEY: Key for cookie encryption/decryption
         """
+        # Use a session-based storage instead of global dictionary
+        # This will be managed by the adapter layer to ensure session isolation
         self.download_status: Dict[str, Dict[str, Any]] = {}
         self.active_processes: Dict[str, Any] = {}
         self.config = config

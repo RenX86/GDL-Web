@@ -191,6 +191,10 @@ def list_download_files(download_id: str) -> Response:
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
+    
+    # Check if this download belongs to the current session
+    if not download_service.is_download_in_session(download_id):
+        raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
 
     # Get download status to find the output directory
     status = download_service.get_download_status(download_id)
@@ -245,6 +249,10 @@ def download_file(download_id: str, filename: str) -> Response:
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
+    
+    # Check if this download belongs to the current session
+    if not download_service.is_download_in_session(download_id):
+        raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
 
     # Get download status
     status = download_service.get_download_status(download_id)

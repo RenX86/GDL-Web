@@ -105,14 +105,9 @@ function startDownload() {
 
 // Refresh download status
 function refreshDownloads() {
-    // Check if this is a new session
+    // Set session flag if not already set (but don't clear history)
     if (!sessionStorage.getItem('downloadSessionActive')) {
-        // Set session flag
         sessionStorage.setItem('downloadSessionActive', 'true');
-        // Clear any existing downloads on the server
-        fetch('/api/clear-history', { method: 'POST' })
-            .then(response => response.json())
-            .catch(error => console.error('Error clearing downloads:', error));
     }
     
     fetch('/api/downloads')
