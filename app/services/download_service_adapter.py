@@ -35,14 +35,6 @@ class DownloadServiceAdapter:
                 session['session_id'] = str(uuid.uuid4())
             if 'user_downloads' not in session:
                 session['user_downloads'] = {}
-            
-            # Create user-specific download directory if it doesn't exist
-            if 'user_download_dir' not in session:
-                base_download_dir = current_app.config.get("DOWNLOADS_DIR", "downloads")
-                user_dir = os.path.join(base_download_dir, f"user_{session['session_id']}")
-                os.makedirs(user_dir, exist_ok=True)
-                session['user_download_dir'] = user_dir
-                self.logger.info(f"Created user-specific download directory: {user_dir}")
         except RuntimeError:
             # We're outside request context, can't access session
             pass
@@ -120,6 +112,14 @@ class DownloadServiceAdapter:
         # Ensure session is initialized with user-specific directory
         self._ensure_session_initialized()
         
+        # Create user-specific download directory if it doesn't exist
+        if 'user_download_dir' not in session:
+            base_download_dir = current_app.config.get("DOWNLOADS_DIR", "downloads")
+            user_dir = os.path.join(base_download_dir, f"user_{session['session_id']}")
+            os.makedirs(user_dir, exist_ok=True)
+            session['user_download_dir'] = user_dir
+            self.logger.info(f"Created user-specific download directory: {user_dir}")
+
         # Use user-specific download directory if none provided
         if not output_dir:
             output_dir = self._get_user_download_dir()
@@ -322,7 +322,7 @@ class DownloadServiceAdapter:
         active_downloads = sum(1 for d in session_download_list if d.get('status') == 'downloading')
         
         return {
-            'total_downloads': total_downloads,
+            'total_downloads': total,
             'completed_downloads': completed_downloads,
             'failed_downloads': failed_downloads,
             'active_downloads': active_downloads,
