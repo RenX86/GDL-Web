@@ -23,7 +23,7 @@ class Config:
     DOWNLOADS_DIR = os.environ.get("DOWNLOADS_DIR") or os.path.join(
         os.getcwd(), "downloads"
     )
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 16MB
 
     # Security Configuration
     COOKIES_DIR = os.environ.get("COOKIES_DIR") or os.path.join(
@@ -52,6 +52,9 @@ class Config:
             "filename": "{category}_{id}.{extension}",
             "write-info-json": True,
         },
+        'instagram': {
+            'filename': 'PostBy_{username}_{post_shortcode}_{num}.{extension}'
+        }
     }
 
     # Default values for subclasses

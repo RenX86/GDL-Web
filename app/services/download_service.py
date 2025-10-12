@@ -13,6 +13,7 @@ import logging
 import shutil
 from datetime import datetime
 from typing import Optional, Dict, List, Any
+from queue import Queue, Empty
 from .network_utils import (
     check_network_connectivity,
     check_url_accessibility,
@@ -209,19 +210,19 @@ class DownloadService:
                     self.logger.info(f"Starting download {download_id} for URL: {url}")
 
                 # Prepare gallery-dl command from config
-                cmd = ["gallery-dl"]
-                gallery_dl_config = self.config.get("GALLERY_DL_CONFIG", {})
+                cmd = ['gallery-dl']
+                gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
                 if isinstance(gallery_dl_config, dict):
                     for section, settings in gallery_dl_config.items():
                         if isinstance(settings, dict):
                             for key, value in settings.items():
                                 if isinstance(value, bool) and value:
-                                    cmd.append(f"--{key}")
+                                    cmd.append(f'--{key}')
                                 elif not isinstance(value, bool) and value is not None:
-                                    cmd.extend([f"--{key}", str(value)])
+                                    cmd.extend([f'--{key}', str(value)])
 
-                cmd.extend(["-D", output_dir])
-                cmd.append("--verbose")
+                cmd.extend(['-D', output_dir])
+                cmd.append('--verbose')  # Mitigate rate limiting
 
                 if cookies_content and self.encryption_key:
                     # Use the secure cookie file that was already created
