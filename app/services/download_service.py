@@ -134,6 +134,22 @@ class DownloadService:
 
         return download_id
 
+    def _enqueue_output(self, stream: Any, queue: Queue[str]) -> None:
+        """
+        Read from a stream and put lines into a queue.
+
+        Args:
+            stream: The stream to read from (e.g., process.stdout)
+            queue: The queue to put the lines into
+        """
+        try:
+            for line in iter(stream.readline, ""):
+                queue.put(line)
+        except Exception as e:
+            self.logger.error(f"Error reading stream: {str(e)}")
+        finally:
+            stream.close()
+
     def _download_worker(  # noqa: C901
         self,
         download_id: str,
@@ -154,11 +170,9 @@ class DownloadService:
         retry_count = 0
         last_error = None
 
-        # Get cookie file path if cookies were provided
         if cookies_content:
             cookie_file_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
 
-        # Check network connectivity first
         if not check_network_connectivity():
             self.download_status[download_id].update(
                 {
@@ -170,7 +184,6 @@ class DownloadService:
             )
             return
 
-        # Check if URL is accessible
         if not check_url_accessibility(url):
             self.download_status[download_id].update(
                 {
@@ -182,7 +195,6 @@ class DownloadService:
             )
             return
 
-        # Retry loop
         while retry_count <= self.max_retries:
             try:
                 if retry_count > 0:
@@ -194,13 +206,10 @@ class DownloadService:
                         }
                     )
                     self.logger.info(
-                        f"Retrying download {download_id} "
-                        f"(Attempt {retry_count}/{self.max_retries})"
+                        f"Retrying download {download_id} (Attempt {retry_count}/{self.max_retries})"
                     )
-                    # Wait before retrying
-                    time.sleep(self.retry_delay * retry_count)  # Exponential backoff
+                    time.sleep(self.retry_delay * retry_count)
                 else:
-                    # First attempt
                     self.download_status[download_id].update(
                         {
                             "status": "downloading",
@@ -209,7 +218,6 @@ class DownloadService:
                     )
                     self.logger.info(f"Starting download {download_id} for URL: {url}")
 
-                # Prepare gallery-dl command from config
                 cmd = ['gallery-dl']
                 gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
                 if isinstance(gallery_dl_config, dict):
@@ -221,20 +229,17 @@ class DownloadService:
                                 elif not isinstance(value, bool) and value is not None:
                                     cmd.extend([f'--{key}', str(value)])
 
+                cmd.extend(['--sleep', '2-4'])
                 cmd.extend(['-D', output_dir])
-                cmd.append('--verbose')  # Mitigate rate limiting
+                cmd.append('--verbose')
 
                 if cookies_content and self.encryption_key:
-                    # Use the secure cookie file that was already created
                     if cookie_file_path and os.path.exists(cookie_file_path):
-                        # Read and decrypt the cookie content
                         with open(cookie_file_path, "r") as f:
                             encrypted_content = f.read()
                         decrypted_content = decrypt_cookies(
                             encrypted_content, self.encryption_key
                         )
-
-                        # Write the decrypted content to a temporary file in the cookies directory for gallery-dl to use
                         temp_cookie_path = os.path.join(
                             self.cookies_dir, ".temp_cookies.txt"
                         )
@@ -242,14 +247,11 @@ class DownloadService:
                             f.write(decrypted_content)
                         cmd.extend(["--cookies", temp_cookie_path])
 
-                # Sanitize URL to prevent OS command injection
                 import shlex
 
                 sanitized_url = shlex.quote(url)
                 cmd.append(sanitized_url)
 
-                # Execute gallery-dl with real-time output capture
-                # Log the command we're about to run (without exposing secrets)
                 self.logger.debug(
                     "Starting gallery-dl with command: %s (cookies: %s)",
                     cmd,
@@ -262,71 +264,60 @@ class DownloadService:
                     stderr=subprocess.PIPE,
                     text=True,
                     universal_newlines=True,
-                    bufsize=1,
                 )
 
-                # Store process for potential cancellation
                 self.active_processes[download_id] = process
 
-                # Read output in real-time
+                q_stdout: Queue[str] = Queue()
+                q_stderr: Queue[str] = Queue()
+
+                t_stdout = threading.Thread(
+                    target=self._enqueue_output, args=(process.stdout, q_stdout)
+                )
+                t_stderr = threading.Thread(
+                    target=self._enqueue_output, args=(process.stderr, q_stderr)
+                )
+                t_stdout.daemon = True
+                t_stderr.daemon = True
+                t_stdout.start()
+                t_stderr.start()
+
                 stdout_lines = []
                 stderr_lines = []
-
-                # Track network issues during download
                 network_error_detected = False
 
-                # Update status while process is running
-                while process.poll() is None:
-                    # Read stdout
-                    if process.stdout:
-                        line = process.stdout.readline()
-                        if line:
-                            stdout_lines.append(line.strip())
-                            # Emit gallery-dl output to logs for visibility
-                            self.logger.debug(f"[gallery-dl] {line.strip()}")
-                            parse_progress(self.download_status, download_id, line)
+                while t_stdout.is_alive() or t_stderr.is_alive() or not q_stdout.empty() or not q_stderr.empty():
+                    try:
+                        line = q_stdout.get_nowait()
+                        stdout_lines.append(line.strip())
+                        self.logger.debug(f"[gallery-dl] {line.strip()}")
+                        parse_progress(self.download_status, download_id, line)
+                        if any(
+                            err in line.lower()
+                            for err in ["connection error", "timeout", "network", "connection refused"]
+                        ):
+                            network_error_detected = True
+                    except Empty:
+                        pass
 
-                            # Check for network-related errors in output
-                            if any(
-                                err in line.lower()
-                                for err in [
-                                    "connection error",
-                                    "timeout",
-                                    "network",
-                                    "connection refused",
-                                ]
-                            ):
-                                network_error_detected = True
+                    try:
+                        line = q_stderr.get_nowait()
+                        stderr_lines.append(line.strip())
+                        self.logger.debug(f"[gallery-dl-error] {line.strip()}")
+                        if any(
+                            err in line.lower()
+                            for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]
+                        ):
+                            network_error_detected = True
+                    except Empty:
+                        pass
+                    
+                    time.sleep(0.1)
 
-                    time.sleep(0.1)  # Small delay to prevent excessive CPU usage
-
-                # Read any remaining output
-                remaining_stdout, remaining_stderr = process.communicate()
-                if remaining_stdout:
-                    stdout_lines.extend(remaining_stdout.strip().split("\n"))
-                if remaining_stderr:
-                    stderr_lines.extend(remaining_stderr.strip().split("\n"))
-
-                # Remove from active processes
+                process.wait()
                 self.active_processes.pop(download_id, None)
 
-                # Check for network errors in stderr
-                if stderr_lines:
-                    network_error_detected = network_error_detected or any(
-                        err in line.lower()
-                        for line in stderr_lines
-                        for err in [
-                            "connection error",
-                            "timeout",
-                            "network",
-                            "connection refused",
-                            "connection reset",
-                        ]
-                    )
-
-                # Update final status
                 if process.returncode == 0:
-                    # Success!
                     self.download_status[download_id].update(
                         {
                             "status": "completed",
@@ -343,16 +334,10 @@ class DownloadService:
                         download_id,
                         self.download_status[download_id].get("files_downloaded", 0),
                     )
-                    # Success, break out of retry loop
                     break
                 else:
-                    # Handle different error types
                     error_message = "\n".join(stderr_lines) or "Unknown error occurred"
-
-                    # Check if we should retry based on error type
-                    if network_error_detected or self._is_retriable_error(
-                        error_message
-                    ):
+                    if network_error_detected or self._is_retriable_error(error_message):
                         if retry_count < self.max_retries:
                             self.logger.warning(
                                 "Download %s failed with retriable error: %s",
@@ -363,7 +348,6 @@ class DownloadService:
                             retry_count += 1
                             continue
 
-                    # If we get here, either it's not a retriable error or we've exhausted retries
                     self.download_status[download_id].update(
                         {
                             "status": "failed",
@@ -384,13 +368,9 @@ class DownloadService:
             except Exception as e:
                 self.logger.error(f"Exception in download worker: {str(e)}")
                 last_error = str(e)
-
-                # Check if we should retry
                 if retry_count < self.max_retries:
                     retry_count += 1
                     continue
-
-                # If we've exhausted retries, update status with failure
                 self.download_status[download_id].update(
                     {
                         "status": "failed",
@@ -405,8 +385,6 @@ class DownloadService:
                     download_id,
                     str(e),
                 )
-
-                # Clean up active process
                 self.active_processes.pop(download_id, None)
                 break
 
