@@ -4,7 +4,7 @@ API Routes Module
 This module contains all API routes for the application.
 """
 
-from flask import Blueprint, request, jsonify, current_app, Response, send_file
+from flask import Blueprint, request, jsonify, current_app, Response, send_file, session
 from ..utils import handle_api_errors, validate_required_fields, secure_file_serve, list_directory_contents, get_file_info, format_file_size, is_safe_path
 from ..models.config import AppConfig
 from ..exceptions import ResourceNotFoundError, ValidationError
@@ -32,7 +32,7 @@ def start_download() -> Response:
 
     # Start download using config from Flask app
     download_id = download_service.start_download(
-        url, current_app.config["DOWNLOADS_DIR"], cookies_content
+        url, cookies_content=cookies_content
     )
 
     return jsonify(
@@ -142,6 +142,18 @@ def clear_download_history() -> Response:
     return jsonify(
         {"success": True, "message": "Download history cleared successfully"}
     )
+
+
+@api_bp.route("/session/clear", methods=["POST"])
+@handle_api_errors
+def clear_session() -> Response:
+    """Clear the entire user session"""
+    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    session_id = session.get("session_id")
+    if session_id:
+        download_service.clear_history(session_id=session_id)
+    session.clear()
+    return jsonify({"success": True, "message": "Session cleared successfully"})
 
 
 @api_bp.route("/cancel/<download_id>", methods=["POST"])

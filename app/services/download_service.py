@@ -10,6 +10,7 @@ import threading
 import time
 import os
 import logging
+import shutil
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from .network_utils import (
@@ -78,7 +79,11 @@ class DownloadService:
             return False
 
     def start_download(
-        self, url: str, output_dir: str, cookies_content: Optional[str] = None
+        self,
+        url: str,
+        output_dir: str,
+        cookies_content: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> str:
         """
         Start a new download and return download ID.
@@ -87,6 +92,7 @@ class DownloadService:
             url (str): URL to download from
             output_dir (str): Directory to save downloaded files
             cookies_content (str, optional): Cookie content for authenticated downloads
+            session_id (str, optional): The session ID of the user
 
         Returns:
             str: Unique download ID for tracking
@@ -106,6 +112,7 @@ class DownloadService:
             "total_size": 0,
             "error": None,
             "output_dir": output_dir,
+            "session_id": session_id,
         }
 
         # Start download in background thread
@@ -529,6 +536,22 @@ class DownloadService:
         """
         return download_id in self.download_status
 
+    def delete_download_files(self, download_id: str) -> None:
+        """
+        Delete the files associated with a download.
+
+        Args:
+            download_id (str): The ID of the download to delete.
+        """
+        if download_id in self.download_status:
+            output_dir = self.download_status[download_id].get("output_dir")
+            if output_dir and os.path.exists(output_dir):
+                try:
+                    shutil.rmtree(output_dir)
+                    self.logger.info(f"Deleted download directory: {output_dir}")
+                except Exception as e:
+                    self.logger.error(f"Error deleting download directory {output_dir}: {e}")
+
     def delete_download(self, download_id: str) -> bool:
         """
         Delete a download entry and clean up related resources.
@@ -557,6 +580,7 @@ class DownloadService:
 
         # Remove status entry
         if download_id in self.download_status:
+            self.delete_download_files(download_id)
             self.download_status.pop(download_id, None)
 
         # Remove encrypted cookie file if present
@@ -571,39 +595,47 @@ class DownloadService:
 
         return True
 
-    def clear_history(self) -> None:  # noqa: C901
+    def clear_history(self, session_id: Optional[str] = None) -> None:  # noqa: C901
         """
         Clear all download history and cleanup resources.
         Terminates any active processes, removes cookie files related to downloads,
         and empties the download status registry.
         """
-        # Terminate all active processes
-        for did, process in list(self.active_processes.items()):
+        if session_id:
+            # Clear history for a specific session
+            download_ids_to_remove = [
+                did
+                for did, status in self.download_status.items()
+                if status.get("session_id") == session_id
+            ]
+            for did in download_ids_to_remove:
+                self.delete_download(did)
+        else:
+            # Clear all history
+            for did, process in list(self.active_processes.items()):
+                try:
+                    process.terminate()
+                except Exception as e:
+                    self.logger.error("Error terminating process for %s: %s", did, str(e))
+            self.active_processes.clear()
+
+            for did in list(self.download_status.keys()):
+                self.delete_download_files(did)
+                try:
+                    enc_cookie_path = os.path.join(self.cookies_dir, f"{did}.txt")
+                    if os.path.exists(enc_cookie_path):
+                        os.remove(enc_cookie_path)
+                except Exception as e:
+                    self.logger.error("Error removing cookie file for %s: %s", did, str(e))
+
             try:
-                process.terminate()
+                temp_cookie_path = os.path.join(self.cookies_dir, ".temp_cookies.txt")
+                if os.path.exists(temp_cookie_path):
+                    os.remove(temp_cookie_path)
             except Exception as e:
-                self.logger.error("Error terminating process for %s: %s", did, str(e))
-        self.active_processes.clear()
+                self.logger.error("Error removing temp cookie file: %s", str(e))
 
-        # Remove cookie files for known downloads
-        for did in list(self.download_status.keys()):
-            try:
-                enc_cookie_path = os.path.join(self.cookies_dir, f"{did}.txt")
-                if os.path.exists(enc_cookie_path):
-                    os.remove(enc_cookie_path)
-            except Exception as e:
-                self.logger.error("Error removing cookie file for %s: %s", did, str(e))
-
-        # Remove temporary cookie file if present
-        try:
-            temp_cookie_path = os.path.join(self.cookies_dir, ".temp_cookies.txt")
-            if os.path.exists(temp_cookie_path):
-                os.remove(temp_cookie_path)
-        except Exception as e:
-            self.logger.error("Error removing temp cookie file: %s", str(e))
-
-        # Clear status registry
-        self.download_status.clear()
+            self.download_status.clear()
 
     def get_statistics(self) -> Dict[str, Any]:
         """

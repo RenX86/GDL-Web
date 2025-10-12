@@ -125,7 +125,8 @@ class DownloadServiceAdapter:
             output_dir = self._get_user_download_dir()
         
         # Start the download with the user-specific directory
-        download_id = cast(str, self._service.start_download(url, output_dir, cookies_content))
+        session_id = session.get('session_id')
+        download_id = cast(str, self._service.start_download(url, output_dir, cookies_content, session_id=session_id))
         
         # Track this download in the session
         session_downloads = self._get_session_downloads()
@@ -295,19 +296,12 @@ class DownloadServiceAdapter:
         
         self._service.delete_download(download_id)
 
-    def clear_history(self) -> None:
+    def clear_history(self, session_id: Optional[str] = None) -> None:
         """
         Clear all download history for the current session.
         """
-        session_downloads = self._get_session_downloads()
-        
-        # Delete each download in the session from the service
-        for download_id in list(session_downloads.keys()):
-            try:
-                self._service.delete_download(download_id)
-            except Exception:
-                # Ignore errors for individual deletions
-                pass
+        if session_id:
+            self._service.clear_history(session_id=session_id)
         
         # Clear session tracking
         self._set_session_downloads({})

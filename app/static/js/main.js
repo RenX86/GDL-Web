@@ -265,13 +265,13 @@ function startRefreshing() {
     refreshDownloads(); // Refresh immediately
 }
 
-// Clear download history
-function clearHistory() {
-    if (!confirm('Are you sure you want to clear all completed downloads?')) {
+// Clear the entire session
+function clearSession() {
+    if (!confirm('Are you sure you want to clear your entire session? This will remove all download history and reset the application.')) {
         return;
     }
-    
-    fetch('/api/downloads/clear', {
+
+    fetch('/api/session/clear', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -280,14 +280,17 @@ function clearHistory() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            refreshDownloads();
+            showNotification('Session cleared successfully!', 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
         } else {
-            alert('Failed to clear history: ' + (data.message || 'Unknown error'));
+            alert('Failed to clear session: ' + (data.message || 'Unknown error'));
         }
     })
     .catch(error => {
-        console.error('Error clearing history:', error);
-        alert('Network error occurred while clearing history');
+        console.error('Error clearing session:', error);
+        alert('Network error occurred while clearing session');
     });
 }
 
