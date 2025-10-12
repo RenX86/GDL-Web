@@ -2,11 +2,14 @@
 Download Service Adapter
 
 This module provides an adapter for the DownloadService to use the new data models.
+It implements session-based isolation to ensure each user has their own download instance.
 """
 
 from typing import Any, Optional, Dict, List, cast
-from flask import session
+from flask import session, current_app
 import uuid
+import os
+import logging
 
 
 class DownloadServiceAdapter:
@@ -23,6 +26,7 @@ class DownloadServiceAdapter:
             download_service: The download service to adapt
         """
         self._service = download_service
+        self.logger = logging.getLogger(__name__)
     
     def _ensure_session_initialized(self) -> None:
         """Ensure session has required keys for download isolation."""
@@ -31,9 +35,33 @@ class DownloadServiceAdapter:
                 session['session_id'] = str(uuid.uuid4())
             if 'user_downloads' not in session:
                 session['user_downloads'] = {}
+            
+            # Create user-specific download directory if it doesn't exist
+            if 'user_download_dir' not in session:
+                base_download_dir = current_app.config.get("DOWNLOADS_DIR", "downloads")
+                user_dir = os.path.join(base_download_dir, f"user_{session['session_id']}")
+                os.makedirs(user_dir, exist_ok=True)
+                session['user_download_dir'] = user_dir
+                self.logger.info(f"Created user-specific download directory: {user_dir}")
         except RuntimeError:
             # We're outside request context, can't access session
             pass
+        except Exception as e:
+            self.logger.error(f"Error initializing session: {str(e)}")
+            # Fall back to default directory if there's an error
+            pass
+    
+    def _get_user_download_dir(self) -> str:
+        """Get the user-specific download directory."""
+        try:
+            self._ensure_session_initialized()
+            return session.get('user_download_dir', current_app.config.get("DOWNLOADS_DIR", "downloads"))
+        except RuntimeError:
+            # We're outside request context, return default
+            return current_app.config.get("DOWNLOADS_DIR", "downloads")
+        except Exception as e:
+            self.logger.error(f"Error getting user download directory: {str(e)}")
+            return current_app.config.get("DOWNLOADS_DIR", "downloads")
     
     def _get_session_downloads(self) -> Dict[str, Dict[str, Any]]:
         """Get downloads for current session."""
@@ -79,6 +107,7 @@ class DownloadServiceAdapter:
     ) -> str:
         """
         Start a new download using the Download model.
+        Uses session-specific download directories for better multi-user isolation.
 
         Args:
             url (str): URL to download from
@@ -88,6 +117,14 @@ class DownloadServiceAdapter:
         Returns:
             str: Unique download ID for tracking
         """
+        # Ensure session is initialized with user-specific directory
+        self._ensure_session_initialized()
+        
+        # Use user-specific download directory if none provided
+        if not output_dir:
+            output_dir = self._get_user_download_dir()
+        
+        # Start the download with the user-specific directory
         download_id = cast(str, self._service.start_download(url, output_dir, cookies_content))
         
         # Track this download in the session
@@ -96,7 +133,8 @@ class DownloadServiceAdapter:
             'id': download_id,
             'url': url,
             'start_time': self._service.download_status.get(download_id, {}).get('start_time'),
-            'session_id': session.get('session_id')
+            'session_id': session.get('session_id'),
+            'output_dir': output_dir  # Track the output directory for this download
         }
         self._set_session_downloads(session_downloads)
         
@@ -179,7 +217,16 @@ class DownloadServiceAdapter:
             list: List of downloads belonging to current session
         """
         all_downloads = cast(List[Dict[str, Any]], self._service.get_all_downloads())
-        return self._filter_downloads_by_session(all_downloads)
+        
+        # Strictly filter downloads by current session
+        session_downloads = self._get_session_downloads()
+        session_download_ids = set(session_downloads.keys())
+        
+        # Only return downloads that are explicitly tracked in the current session
+        filtered_downloads = [d for d in all_downloads if d.get('id') in session_download_ids]
+        
+        self.logger.debug(f"Filtered {len(all_downloads)} total downloads to {len(filtered_downloads)} session downloads")
+        return filtered_downloads
 
     def download_exists(self, download_id: str) -> bool:
         """
