@@ -11,6 +11,7 @@ import time
 import os
 import logging
 import shutil
+from threading import RLock
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from queue import Queue, Empty
@@ -43,6 +44,7 @@ class DownloadService:
         """
         # Use a session-based storage instead of global dictionary
         # This will be managed by the adapter layer to ensure session isolation
+        self._lock = RLock()
         self.download_status: Dict[str, Dict[str, Any]] = {}
         self.active_processes: Dict[str, Any] = {}
         self.config = config
@@ -61,6 +63,30 @@ class DownloadService:
         # Initialize encryption key
         self.encryption_key = config.get("COOKIES_ENCRYPTION_KEY")
 
+    def _set_status(self, download_id: str, **kwargs) -> None:
+        """Atomic update (insert or merge)"""
+        with self._lock:
+            if download_id not in self.download_status:
+                self.download_status[download_id] = {}
+            self.download_status[download_id].update(kwargs)
+
+    def _get_status_copy(self, download_id: str) -> Optional[Dict[str, Any]]:
+        """Return a *deep* copy so caller cannot mutate the shared dict"""
+        with self._lock:
+            import copy
+            return copy.deepcopy(self.download_status.get(download_id))
+        
+    def _pop_status(self, download_id: str) -> Optional[Dict[str, Any]]:
+        """Atomic delete"""
+        with self._lock:
+            return self.download_status.pop(download_id, None)
+        
+    def _list_status_copy(self) -> Dict[str, Dict[str, Any]]:
+        """Deep copy of the entire dict (for get_all_downloads)"""
+        with self._lock:
+            import copy
+            return copy.deepcopy(self.download_status)
+   
     def is_valid_url(self, url: str) -> bool:
         """
         Validate if the provided URL is valid.
@@ -101,37 +127,33 @@ class DownloadService:
         download_id = str(int(time.time() * 1000))  # More unique ID
 
         # Initialize status
-        self.download_status[download_id] = {
-            "id": download_id,
-            "status": "starting",
-            "progress": 0,
-            "message": "Initializing download...",
-            "url": url,
-            "start_time": datetime.now().isoformat(),
-            "end_time": None,
-            "files_downloaded": 0,
-            "total_size": 0,
-            "error": None,
-            "output_dir": output_dir,
-            "session_id": session_id,
-        }
+        self._set_status(
+            download_id,
+            id=download_id,
+            status="starting",
+            progress=0,
+            message="Initializing download...",
+            url=url,
+            start_time=datetime.now().isoformat(),
+            end_time=None,
+            files_downloaded=0,
+            total_size=0,
+            error=None,
+            output_dir=output_dir,
+            session_id=session_id,
+        )
 
-        # Start download in background thread
-        thread = threading.Thread(
+        threading.Thread(
             target=self._download_worker,
             args=(download_id, url, output_dir, cookies_content),
-        )
-        thread.daemon = True
-        thread.start()
+            daemon=True,
+        ).start()
 
-        # Store encrypted cookies if provided
         if cookies_content and self.encryption_key:
-            cookie_file_name = f"{download_id}.txt"
-            cookie_file_path = os.path.join(self.cookies_dir, cookie_file_name)
-            encrypted_content = encrypt_cookies(cookies_content, self.encryption_key)
+            cookie_file_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
+            encrypted = encrypt_cookies(cookies_content, self.encryption_key)
             with open(cookie_file_path, "w") as f:
-                f.write(encrypted_content)
-
+                f.write(encrypted)
         return download_id
 
     def _enqueue_output(self, stream: Any, queue: Queue[str]) -> None:
@@ -174,49 +196,74 @@ class DownloadService:
             cookie_file_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
 
         if not check_network_connectivity():
-            self.download_status[download_id].update(
-                {
-                    "status": "failed",
-                    "message": "Network connectivity issue. Please check your internet connection.",
-                    "end_time": datetime.now().isoformat(),
-                    "error": "Network connectivity issue",
-                }
+            self._set_status(
+                download_id,
+                status="failed",
+                message="Network connectivity issue. Please check your internet connection.",
+                end_time=datetime.now().isoformat(),
+                error="Network connectivity issue",
             )
             return
 
         if not check_url_accessibility(url):
-            self.download_status[download_id].update(
-                {
-                    "status": "failed",
-                    "message": f"URL {url} is not accessible. The site might be down or blocking requests.",
-                    "end_time": datetime.now().isoformat(),
-                    "error": "URL not accessible",
-                }
+            self._set_status(
+                download_id,
+                status="failed",
+                message=f"URL {url} is not accessible. The site might be down or blocking requests.",
+                end_time=datetime.now().isoformat(),
+                error="URL not accessible",
             )
             return
 
         while retry_count <= self.max_retries:
             try:
                 if retry_count > 0:
-                    self.download_status[download_id].update(
-                        {
-                            "status": "retrying",
-                            "message": f"Retrying download (Attempt {retry_count}/{self.max_retries})...",
-                            "retry_count": retry_count,
-                        }
+                    self._set_status(
+                        download_id,
+                        status="retrying",
+                        message=f"Retrying download (Attempt {retry_count}/{self.max_retries})...",
+                        retry_count=retry_count,
                     )
-                    self.logger.info(
-                        f"Retrying download {download_id} (Attempt {retry_count}/{self.max_retries})"
-                    )
-                    time.sleep(self.retry_delay * retry_count)
                 else:
-                    self.download_status[download_id].update(
-                        {
-                            "status": "downloading",
-                            "message": "Starting gallery-dl process...",
-                        }
+                    self._set_status(
+                        download_id,
+                        status="downloading",
+                        message="Starting gallery-dl process...",
                     )
-                    self.logger.info(f"Starting download {download_id} for URL: {url}")
+                ...
+                if process.returncode == 0:
+                    self._set_status(
+                        download_id,
+                        status="completed",
+                        message="Download completed successfully!",
+                        progress=100,
+                        end_time=datetime.now().isoformat(),
+                        output="\n".join(stdout_lines),
+                        files_downloaded=count_downloaded_files(stdout_lines),
+                        retry_count=retry_count,
+                    )
+                    break
+                else:
+                    ...
+                    self._set_status(
+                        download_id,
+                        status="failed",
+                        message=f"Download failed after {retry_count} retries: {error_message}",
+                        end_time=datetime.now().isoformat(),
+                        error=error_message,
+                        retry_count=retry_count,
+                    )
+            except Exception as e:
+                ...
+                self._set_status(
+                    download_id,
+                    status="failed",
+                    message=f"Error after {retry_count} retries: {str(e)}",
+                    end_time=datetime.now().isoformat(),
+                    error=str(e),
+                    retry_count=retry_count,
+                )
+                self.logger.info(f"Starting download {download_id} for URL: {url}")
 
                 cmd = ['gallery-dl']
                 gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
@@ -317,6 +364,17 @@ class DownloadService:
                 process.wait()
                 self.active_processes.pop(download_id, None)
 
+                if process is None:
+                    # gallery-dl never started → treat as permanent failure
+                    self._set_status(
+                        download_id,
+                        status="failed",
+                        message="Download could not be started (bad URL, cookies, or rate-limit).",
+                        end_time=datetime.now().isoformat(),
+                        error="Gallery-dl failed to launch",
+                    )
+                    break
+
                 if process.returncode == 0:
                     self.download_status[download_id].update(
                         {
@@ -348,14 +406,13 @@ class DownloadService:
                             retry_count += 1
                             continue
 
-                    self.download_status[download_id].update(
-                        {
-                            "status": "failed",
-                            "message": f"Download failed after {retry_count} retries: {error_message}",
-                            "end_time": datetime.now().isoformat(),
-                            "error": error_message,
-                            "retry_count": retry_count,
-                        }
+                    self._set_status(
+                        download_id,
+                        status="failed",
+                        message=f"Download failed after {retry_count} retries: {error_message}",
+                        end_time=datetime.now().isoformat(),
+                        error=error_message,
+                        retry_count=retry_count,
                     )
                     self.logger.error(
                         "Download %s failed: %s (retry_count=%s)",
@@ -394,15 +451,13 @@ class DownloadService:
             and last_error
             and is_network_error(last_error)
         ):
-            self.download_status[download_id].update(
-                {
-                    "message": "Download failed due to persistent network issues. Please check your internet connection and try again later.",
-                    "network_issue": True,
-                }
+            self._set_status(
+                download_id,
+                message="Download failed due to persistent network issues. Please check your internet connection and try again later.",
+                network_issue=True,
             )
             self.logger.warning(
-                "Download %s failed due to persistent network issues.",
-                download_id,
+                "Download %s failed due to persistent network issues.", download_id
             )
 
         # Clean up cookie files if they exist
@@ -465,33 +520,22 @@ class DownloadService:
         Returns:
             dict: Status information or None if download_id not found
         """
-        return self.download_status.get(download_id)
+        return self._get_status_copy(download_id)
 
     def cancel_download(self, download_id: str) -> bool:
-        """
-        Cancel an active download.
-
-        Args:
-            download_id (str): Download ID to cancel
-
-        Returns:
-            bool: True if download was cancelled, False otherwise
-        """
         if download_id in self.active_processes:
-            process = self.active_processes[download_id]
+            process = self.active_processes.pop(download_id)
             try:
                 process.terminate()
-                self.download_status[download_id].update(
-                    {
-                        "status": "cancelled",
-                        "message": "Download cancelled by user",
-                        "end_time": datetime.now().isoformat(),
-                    }
+                self._set_status(
+                    download_id,
+                    status="cancelled",
+                    message="Download cancelled by user",
+                    end_time=datetime.now().isoformat(),
                 )
                 return True
             except Exception as e:
-                self.logger.error(f"Error cancelling download {download_id}: {str(e)}")
-                return False
+                self.logger.error("Error cancelling %s: %s", download_id, e)
         return False
 
     def get_all_downloads(self) -> List[Dict[str, Any]]:
@@ -501,7 +545,7 @@ class DownloadService:
         Returns:
             list: List of download status dictionaries
         """
-        return list(self.download_status.values())
+        return list(self._list_status_copy().values())
 
     def download_exists(self, download_id: str) -> bool:
         """
@@ -513,7 +557,7 @@ class DownloadService:
         Returns:
             bool: True if exists, False otherwise
         """
-        return download_id in self.download_status
+        return self._get_status_copy(download_id) is not None
 
     def delete_download_files(self, download_id: str) -> None:
         """
@@ -532,119 +576,40 @@ class DownloadService:
                     self.logger.error(f"Error deleting download directory {output_dir}: {e}")
 
     def delete_download(self, download_id: str) -> bool:
-        """
-        Delete a download entry and clean up related resources.
-        If the download is active, attempt to terminate the process first.
-
-        Args:
-            download_id (str): Download ID to delete
-
-        Returns:
-            bool: True if deletion processed
-        """
-        # Terminate active process if any
         if download_id in self.active_processes:
-            process = self.active_processes.get(download_id)
-            if process:
-                try:
-                    process.terminate()
-                except Exception as e:
-                    self.logger.error(
-                        "Error terminating process for %s: %s",
-                        download_id,
-                        str(e),
-                    )
-                finally:
-                    self.active_processes.pop(download_id, None)
-
-        # Remove status entry
-        if download_id in self.download_status:
-            self.delete_download_files(download_id)
-            self.download_status.pop(download_id, None)
-
-        # Remove encrypted cookie file if present
+            self.active_processes.pop(download_id).terminate()
+        self.delete_download_files(download_id)
+        self._pop_status(download_id)
+        # cookie cleanup
         try:
-            enc_cookie_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
-            if os.path.exists(enc_cookie_path):
-                os.remove(enc_cookie_path)
+            enc = os.path.join(self.cookies_dir, f"{download_id}.txt")
+            if os.path.exists(enc):
+                os.remove(enc)
         except Exception as e:
-            self.logger.error(
-                "Error removing cookie file for %s: %s", download_id, str(e)
-            )
-
+            self.logger.error("Cookie cleanup %s: %s", download_id, e)
         return True
 
-    def clear_history(self, session_id: Optional[str] = None) -> None:  # noqa: C901
-        """
-        Clear all download history and cleanup resources.
-        Terminates any active processes, removes cookie files related to downloads,
-        and empties the download status registry.
-        """
+    def clear_history(self, session_id: Optional[str] = None) -> None:
         if session_id:
-            # Clear history for a specific session
-            download_ids_to_remove = [
-                did
-                for did, status in self.download_status.items()
-                if status.get("session_id") == session_id
-            ]
-            for did in download_ids_to_remove:
+            to_remove = [did for did, st in self._list_status_copy().items()
+                         if st.get("session_id") == session_id]
+            for did in to_remove:
                 self.delete_download(did)
         else:
-            # Clear all history
-            for did, process in list(self.active_processes.items()):
+            for p in list(self.active_processes.values()):
                 try:
-                    process.terminate()
-                except Exception as e:
-                    self.logger.error("Error terminating process for %s: %s", did, str(e))
+                    p.terminate()
+                except Exception:
+                    pass
             self.active_processes.clear()
-
-            for did in list(self.download_status.keys()):
-                self.delete_download_files(did)
-                try:
-                    enc_cookie_path = os.path.join(self.cookies_dir, f"{did}.txt")
-                    if os.path.exists(enc_cookie_path):
-                        os.remove(enc_cookie_path)
-                except Exception as e:
-                    self.logger.error("Error removing cookie file for %s: %s", did, str(e))
-
-            try:
-                temp_cookie_path = os.path.join(self.cookies_dir, ".temp_cookies.txt")
-                if os.path.exists(temp_cookie_path):
-                    os.remove(temp_cookie_path)
-            except Exception as e:
-                self.logger.error("Error removing temp cookie file: %s", str(e))
-
-            self.download_status.clear()
+            for did in list(self._list_status_copy().keys()):
+                self.delete_download(did)
 
     def get_statistics(self) -> Dict[str, Any]:
-        """
-        Get download statistics.
-
-        Returns:
-            dict: Statistics information including total downloads, completed, failed, etc.
-        """
-        total = len(self.download_status)
-        completed = 0
-        failed = 0
-        in_progress = 0
-
-        for status in self.download_status.values():
-            status_value = status.get("status", "unknown").lower()
-            if status_value in ["completed", "finished"]:
-                completed += 1
-            elif status_value in ["failed", "error"]:
-                failed += 1
-            elif status_value in [
-                "downloading",
-                "starting",
-                "processing",
-                "in_progress",
-            ]:
-                in_progress += 1
-
-        return {
-            "total_downloads": total,
-            "completed_downloads": completed,
-            "failed_downloads": failed,
-            "in_progress_downloads": in_progress,
-        }
+        data = self._list_status_copy().values()
+        total = len(data)
+        completed = sum(1 for st in data if st.get("status") in {"completed", "finished"})
+        failed = sum(1 for st in data if st.get("status") in {"failed", "error"})
+        in_progress = sum(1 for st in data if st.get("status") in {"downloading", "starting", "processing", "in_progress"})
+        return {"total_downloads": total, "completed_downloads": completed,
+                "failed_downloads": failed, "in_progress_downloads": in_progress}
