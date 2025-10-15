@@ -28,13 +28,14 @@ def parse_progress(download_status: dict, download_id: str, line: str, files_so_
             return current          # new counter value
 
         # 2. Unknown total → grow 5 % per finished file (cap 90 %)
-        if line.lower().endswith((".webp", ".jpg", ".jpeg", ".png", ".mp4", ".webm")):   # finished a file
+        line_stripped = line.strip().lower()
+        if line_stripped.endswith(('.webp', '.jpg', '.jpeg', '.png', '.mp4', '.webm')):   # finished a file
             files_so_far += 1
-            logger.debug("PARSER SEEN: %s  ->  files_so_far=%s", line.strip(), files_so_far)
+            #logger.debug("PARSER SEEN: %s  ->  files_so_far=%s", line_stripped, files_so_far)
             download_status[download_id].update(
                 files_downloaded=files_so_far,
-                progress=min(90, round(10 + 70 * (1 - 1 / (1 + files_so_far / 5)))),
-                message=f"Downloading file {files_so_far} …"
+                progress=min(90, 10 + files_so_far * 5),
+                message=f"Downloaded file {files_so_far}"
             )
             return files_so_far
 

@@ -43,7 +43,7 @@ class Config:
             )
 
     # Logging Configuration
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+    LOG_LEVEL = os.environ.get("LOG_LEVEL","DEBUG")
     LOG_FILE = os.environ.get("LOG_FILE", "app.log")
 
     # Gallery-dl Configuration
