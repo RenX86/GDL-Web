@@ -285,25 +285,25 @@ class DownloadService:
                 stdout_lines = []
                 stderr_lines = []
                 network_error_detected = False
+                files_so_far = 0 
 
                 while t_stdout.is_alive() or t_stderr.is_alive() or not q_stdout.empty() or not q_stderr.empty():
                     try:
                         line = q_stdout.get_nowait()
                         stdout_lines.append(line.strip())
-                        self.logger.debug(f"[gallery-dl] {line.strip()}")
-                        parse_progress(self.download_status, download_id, line)
-                        if any(
-                            err in line.lower()
-                            for err in ["connection error", "timeout", "network", "connection refused"]
-                        ):
-                            network_error_detected = True
+                        self.logger.info(f"[gallery-dl-stdout] {line.strip()}") # Log stdout at INFO level
+                        files_so_far = parse_progress(   # NEW: pass counter & get back updated value
+                            self.download_status, download_id, line, files_so_far
+                        )
+                        if any(err in line.lower() for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]):
+                            network_error_detected = True   
                     except Empty:
                         pass
 
                     try:
                         line = q_stderr.get_nowait()
                         stderr_lines.append(line.strip())
-                        self.logger.debug(f"[gallery-dl-error] {line.strip()}")
+                        self.logger.info(f"[gallery-dl-stderr] {line.strip()}") # Log stderr at INFO level
                         if any(
                             err in line.lower()
                             for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]

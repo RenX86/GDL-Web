@@ -4,35 +4,55 @@ Progress Parser Module
 This module provides functions for parsing gallery-dl output to extract progress information.
 """
 
+import re
+import logging
+logger = logging.getLogger(__name__)
 
-def parse_progress(download_status: dict, download_id: str, line: str) -> None:
+def parse_progress(download_status: dict, download_id: str, line: str, files_so_far: int = 0) -> int:
     """
-    Parse gallery-dl output to extract progress information.
-
-    Args:
-        download_status (dict): Dictionary containing download status information
-        download_id (str): Download ID
-        line (str): Line of output to parse
+    Update progress bar from a gallery-dl console line.
+    Returns the updated file counter so the worker can keep state.
     """
     try:
-        # Look for download progress indicators in gallery-dl output
-        if "[" in line and "]" in line:
-            # Try to extract file count or progress info
-            if "downloading" in line.lower():
-                download_status[download_id]["message"] = "Downloading files..."
-            elif "extracting" in line.lower():
-                download_status[download_id]["message"] = "Extracting metadata..."
-                download_status[download_id]["progress"] = 25
-            elif "processing" in line.lower():
-                download_status[download_id]["message"] = "Processing files..."
-                download_status[download_id]["progress"] = 50
-    except (KeyError, IndexError, TypeError, AttributeError) as e:
-        # Log parsing errors for debugging but don't crash the download
-        import logging
+        # 1. gallery-dl printed “[download] 3 of 12” → exact %
+        exact = re.search(r"\[download\]\s+(\d+)\s+of\s+(\d+)", line)
+        if exact:
+            current = int(exact.group(1))
+            total   = int(exact.group(2))
+            download_status[download_id].update(
+                progress=round(current / total * 100),
+                files_downloaded=current,
+                total_files=total,
+                message=f"file {current}/{total}"
+            )
+            return current          # new counter value
 
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Progress parsing error for download {download_id}: {str(e)}")
+        # 2. Unknown total → grow 5 % per finished file (cap 90 %)
+        if line.lower().endswith((".webp", ".jpg", ".jpeg", ".png", ".mp4", ".webm")):   # finished a file
+            files_so_far += 1
+            logger.debug("PARSER SEEN: %s  ->  files_so_far=%s", line.strip(), files_so_far)
+            download_status[download_id].update(
+                files_downloaded=files_so_far,
+                progress=min(90, round(10 + 70 * (1 - 1 / (1 + files_so_far / 5)))),
+                message=f"Downloading file {files_so_far} …"
+            )
+            return files_so_far
 
+        # 3. Other stages → fixed percentages
+        if "extracting" in line.lower():
+            download_status[download_id]["progress"] = 5
+            download_status[download_id]["message"]  = "Extracting metadata …"
+            return files_so_far
+
+        if "processing" in line.lower():
+            download_status[download_id]["progress"] = 98
+            download_status[download_id]["message"]  = "Finalising …"
+            return files_so_far
+
+        return files_so_far          # no change
+    except Exception as e:
+        logger.debug("parse_progress error: %s", e)
+        return files_so_far
 
 def count_downloaded_files(stdout_lines: list) -> int:
     """
