@@ -294,26 +294,12 @@ def format_file_size(size_bytes: int) -> str:
 
 def sanitize_filename(filename: str) -> str:
     """
-    Sanitize filename for safe filesystem usage.
-    
-    Args:
-        filename: Original filename
-        
-    Returns:
-        str: Sanitized filename
+    Sanitise user-supplied filename to prevent directory traversal.
+    Removes path separators and resolves any '..' components.
     """
-    # Use Werkzeug's secure_filename as base
-    secure_name = secure_filename(filename)
-    
-    # Additional sanitization
-    if not secure_name:
-        secure_name = "unnamed_file"
-    
-    # Remove leading dots and spaces
-    secure_name = secure_name.lstrip('. ')
-    
-    # Ensure filename is not empty
-    if not secure_name:
-        secure_name = "file"
-    
-    return secure_name
+    # Pure-Python equivalent of Go's filepath.Clean
+    filename = os.path.normpath(filename).lstrip(os.sep)
+    # Drop any remaining path parts (keep basename only)
+    filename = os.path.basename(filename)
+    # Final secure_filename pass for Windows weirdness
+    return secure_filename(filename)

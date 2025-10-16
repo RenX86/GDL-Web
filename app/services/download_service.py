@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 import os
+import uuid
 import logging
 import shutil
 from threading import RLock
@@ -62,6 +63,15 @@ class DownloadService:
 
         # Initialize encryption key
         self.encryption_key = config.get("COOKIES_ENCRYPTION_KEY")
+        MAX_AGE = 24 * 60 * 60   # seconds
+        def _janitor():
+            while True:
+                time.sleep(3600)          # run every hour
+                cutoff = datetime.now().timestamp() - MAX_AGE
+                for did, st in list(self._list_status_copy().items()):
+                    if st.get("end_time") and datetime.fromisoformat(st["end_time"]).timestamp() < cutoff:
+                        self.delete_download(did)
+        threading.Thread(target=_janitor, daemon=True, name="janitor").start()
 
     def _set_status(self, download_id: str, **kwargs) -> None:
         """Atomic update (insert or merge)"""
@@ -124,7 +134,7 @@ class DownloadService:
         Returns:
             str: Unique download ID for tracking
         """
-        download_id = str(int(time.time() * 1000))  # More unique ID
+        download_id = uuid.uuid4().hex  # More unique ID
 
         # Initialize status
         self._set_status(
@@ -191,6 +201,7 @@ class DownloadService:
         cookie_file_path = None
         retry_count = 0
         last_error = None
+        process = None
 
         if cookies_content:
             cookie_file_path = os.path.join(self.cookies_dir, f"{download_id}.txt")
@@ -230,41 +241,8 @@ class DownloadService:
                         status="downloading",
                         message="Starting gallery-dl process...",
                     )
-                ...
-                if process.returncode == 0:
-                    self._set_status(
-                        download_id,
-                        status="completed",
-                        message="Download completed successfully!",
-                        progress=100,
-                        end_time=datetime.now().isoformat(),
-                        output="\n".join(stdout_lines),
-                        files_downloaded=count_downloaded_files(stdout_lines),
-                        retry_count=retry_count,
-                    )
-                    break
-                else:
-                    ...
-                    self._set_status(
-                        download_id,
-                        status="failed",
-                        message=f"Download failed after {retry_count} retries: {error_message}",
-                        end_time=datetime.now().isoformat(),
-                        error=error_message,
-                        retry_count=retry_count,
-                    )
-            except Exception as e:
-                ...
-                self._set_status(
-                    download_id,
-                    status="failed",
-                    message=f"Error after {retry_count} retries: {str(e)}",
-                    end_time=datetime.now().isoformat(),
-                    error=str(e),
-                    retry_count=retry_count,
-                )
-                self.logger.info(f"Starting download {download_id} for URL: {url}")
 
+                # ======  BUILD COMMAND  ======
                 cmd = ['gallery-dl']
                 gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
                 if isinstance(gallery_dl_config, dict):
@@ -280,6 +258,8 @@ class DownloadService:
                 cmd.extend(['-D', output_dir])
                 cmd.append('--verbose')
 
+                # ======  COOKIE HANDLING  ======
+                temp_cookie_path = None
                 if cookies_content and self.encryption_key:
                     if cookie_file_path and os.path.exists(cookie_file_path):
                         with open(cookie_file_path, "r") as f:
@@ -288,14 +268,13 @@ class DownloadService:
                             encrypted_content, self.encryption_key
                         )
                         temp_cookie_path = os.path.join(
-                            self.cookies_dir, ".temp_cookies.txt"
+                            self.cookies_dir, f".temp_{download_id}.txt"
                         )
                         with open(temp_cookie_path, "w") as f:
                             f.write(decrypted_content)
                         cmd.extend(["--cookies", temp_cookie_path])
 
                 import shlex
-
                 sanitized_url = shlex.quote(url)
                 cmd.append(sanitized_url)
 
@@ -305,6 +284,7 @@ class DownloadService:
                     "yes" if cookies_content else "no",
                 )
 
+                # ======  START SUBPROCESS  ======
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -312,9 +292,9 @@ class DownloadService:
                     text=True,
                     universal_newlines=True,
                 )
-
                 self.active_processes[download_id] = process
 
+                # ======  READ OUTPUT  ======
                 q_stdout: Queue[str] = Queue()
                 q_stderr: Queue[str] = Queue()
 
@@ -332,40 +312,38 @@ class DownloadService:
                 stdout_lines = []
                 stderr_lines = []
                 network_error_detected = False
-                files_so_far = 0 
+                files_so_far = 0
 
                 while t_stdout.is_alive() or t_stderr.is_alive() or not q_stdout.empty() or not q_stderr.empty():
                     try:
                         line = q_stdout.get_nowait()
                         stdout_lines.append(line.strip())
-                        self.logger.info(f"[gallery-dl-stdout] {line.strip()}") # Log stdout at INFO level
-                        files_so_far = parse_progress(   # NEW: pass counter & get back updated value
+                        self.logger.info(f"[gallery-dl-stdout] {line.strip()}")
+                        files_so_far = parse_progress(
                             self.download_status, download_id, line, files_so_far
                         )
                         if any(err in line.lower() for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]):
-                            network_error_detected = True   
+                            network_error_detected = True
                     except Empty:
                         pass
 
                     try:
                         line = q_stderr.get_nowait()
                         stderr_lines.append(line.strip())
-                        self.logger.info(f"[gallery-dl-stderr] {line.strip()}") # Log stderr at INFO level
-                        if any(
-                            err in line.lower()
-                            for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]
-                        ):
+                        self.logger.info(f"[gallery-dl-stderr] {line.strip()}")
+                        if any(err in line.lower() for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]):
                             network_error_detected = True
                     except Empty:
                         pass
-                    
+
                     time.sleep(0.1)
 
+                # ======  WAIT FOR TERMINATION  ======
                 process.wait()
                 self.active_processes.pop(download_id, None)
 
-                if process is None:
-                    # gallery-dl never started → treat as permanent failure
+                # ----------  GUARD #1  ----------
+                if process is None:           # should never happen, but be safe
                     self._set_status(
                         download_id,
                         status="failed",
@@ -375,17 +353,17 @@ class DownloadService:
                     )
                     break
 
+                # ----------  GUARD #2  ----------
                 if process.returncode == 0:
-                    self.download_status[download_id].update(
-                        {
-                            "status": "completed",
-                            "message": "Download completed successfully!",
-                            "progress": 100,
-                            "end_time": datetime.now().isoformat(),
-                            "output": "\n".join(stdout_lines),
-                            "files_downloaded": count_downloaded_files(stdout_lines),
-                            "retry_count": retry_count,
-                        }
+                    self._set_status(
+                        download_id,
+                        status="completed",
+                        message="Download completed successfully!",
+                        progress=100,
+                        end_time=datetime.now().isoformat(),
+                        output="\n".join(stdout_lines),
+                        files_downloaded=count_downloaded_files(stdout_lines),
+                        retry_count=retry_count,
                     )
                     self.logger.info(
                         "Download %s completed: %s files downloaded",
@@ -393,7 +371,9 @@ class DownloadService:
                         self.download_status[download_id].get("files_downloaded", 0),
                     )
                     break
-                else:
+
+                # ----------  GUARD #3  ----------
+                elif process is not None:
                     error_message = "\n".join(stderr_lines) or "Unknown error occurred"
                     if network_error_detected or self._is_retriable_error(error_message):
                         if retry_count < self.max_retries:
@@ -422,25 +402,39 @@ class DownloadService:
                     )
                     break
 
+            # ----------  OUTER EXCEPTION  ----------
             except Exception as e:
-                self.logger.error(f"Exception in download worker: {str(e)}")
+                self.logger.exception("Exception in download worker")
                 last_error = str(e)
+
+                if process is None:          # gallery-dl never started
+                    self._set_status(
+                        download_id,
+                        status="failed",
+                        message="Download could not be started (bad URL, cookies, or rate-limit).",
+                        end_time=datetime.now().isoformat(),
+                        error=last_error,
+                    )
+                    break                                    # do NOT retry
+
+                # otherwise consider retry
                 if retry_count < self.max_retries:
                     retry_count += 1
                     continue
-                self.download_status[download_id].update(
-                    {
-                        "status": "failed",
-                        "message": f"Error after {retry_count} retries: {str(e)}",
-                        "end_time": datetime.now().isoformat(),
-                        "error": str(e),
-                        "retry_count": retry_count,
-                    }
+
+                # exhausted retries
+                self._set_status(
+                    download_id,
+                    status="failed",
+                    message=f"Error after {retry_count} retries: {last_error}",
+                    end_time=datetime.now().isoformat(),
+                    error=last_error,
+                    retry_count=retry_count,
                 )
                 self.logger.error(
                     "Download %s failed with exception after retries: %s",
                     download_id,
-                    str(e),
+                    last_error,
                 )
                 self.active_processes.pop(download_id, None)
                 break

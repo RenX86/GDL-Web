@@ -31,14 +31,14 @@ class Config:
     )
     COOKIES_ENCRYPTION_KEY = os.environ.get("COOKIES_ENCRYPTION_KEY")
     if not COOKIES_ENCRYPTION_KEY:
-        # Generate a default key for development/testing, but warn about it
-        if os.environ.get("FLASK_ENV") in ["development", "testing"]:
+        env = os.environ.get("FLASK_ENV", "development")
+        if env in ["development", "testing"]:
             COOKIES_ENCRYPTION_KEY = secrets.token_hex(32)
             print(
                 "⚠️  WARNING: Using generated encryption key for cookies. Set COOKIES_ENCRYPTION_KEY for production."
             )
         else:
-            raise ValueError(
+            raise RuntimeError(
                 "No COOKIES_ENCRYPTION_KEY set for Flask application. Please set it in your environment."
             )
 
@@ -49,11 +49,14 @@ class Config:
     # Gallery-dl Configuration
     GALLERY_DL_CONFIG = {
         "extractor": {
-            "filename": "{category}_{id}.{extension}",
+            'filename': '{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}',
             "write-info-json": True,
         },
         'instagram': {
             'filename': 'PostBy_{username}_{post_shortcode}_{num}.{extension}'
+        },
+        "wallhaven": {  # explicit if you want
+        "filename": "wallhaven_{id}.{extension}"
         }
     }
 

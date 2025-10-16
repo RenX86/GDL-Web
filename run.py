@@ -77,6 +77,11 @@ def main():
     print("-" * 50)
     
     if __name__ == '__main__':
+        if config_name == "production":
+            print("❌ Refusing to start Flask dev server in production.")
+            print("   Use a WSGI server (gunicorn, uvicorn) instead.")
+            sys.exit(2)
+
         try:
             # Run the Flask application using config values
             app.run(

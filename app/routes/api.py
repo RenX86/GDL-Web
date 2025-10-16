@@ -5,7 +5,7 @@ This module contains all API routes for the application.
 """
 
 from flask import Blueprint, request, jsonify, current_app, Response, send_file, session
-from ..utils import handle_api_errors, validate_required_fields, secure_file_serve, list_directory_contents, get_file_info, format_file_size, is_safe_path
+from ..utils import handle_api_errors, validate_required_fields, secure_file_serve, list_directory_contents, get_file_info, format_file_size, is_safe_path, sanitize_filename
 from ..models.config import AppConfig
 from ..exceptions import ResourceNotFoundError, ValidationError
 import os
@@ -257,6 +257,9 @@ def list_download_files(download_id: str) -> Response:
 @handle_api_errors
 def download_file(download_id: str, filename: str) -> Response:
     """Download a specific file from a completed download"""
+    # 1. Strip path traversal sequences and sanitise
+    filename = sanitize_filename(filename)
+
     download_service = current_app.service_registry.get("download_service")  # type: ignore
 
     if not download_service.download_exists(download_id):
@@ -302,7 +305,7 @@ def download_file(download_id: str, filename: str) -> Response:
     if not file_path:
         raise ResourceNotFoundError(f"File '{filename}' not found for download {download_id}")
 
-    # Security check: ensure file is within the allowed downloads directory
+    # 2. Re-validate after join – defence in depth
     if not is_safe_path(downloads_dir, file_path):
         raise ValidationError("Access denied: file path outside allowed directory")
     
