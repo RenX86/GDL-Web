@@ -571,17 +571,11 @@ class DownloadService:
 
     def delete_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:
-            self.active_processes.pop(download_id).terminate()
-        self.delete_download_files(download_id)
-        self._pop_status(download_id)
-        # cookie cleanup
-        try:
-            enc = os.path.join(self.cookies_dir, f"{download_id}.txt")
-            if os.path.exists(enc):
-                os.remove(enc)
-        except Exception as e:
-            self.logger.error("Cookie cleanup %s: %s", download_id, e)
-        return True
+            process = self.active_processes[download_id]   # peek, not pop
+            try:
+                process.terminate()
+            finally:
+                self.active_processes.pop(download_id, None)
 
     def clear_history(self, session_id: Optional[str] = None) -> None:
         if session_id:

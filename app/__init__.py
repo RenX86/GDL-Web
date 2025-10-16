@@ -29,6 +29,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     # Ensure downloads directory exists
     os.makedirs(app.config["DOWNLOADS_DIR"], exist_ok=True)
+    os.makedirs(app.config["COOKIES_DIR"], exist_ok=True, mode=0o700) 
 
     # Initialize services using the registry
     download_service = create_download_service(

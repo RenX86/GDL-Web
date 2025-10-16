@@ -305,6 +305,13 @@ def download_file(download_id: str, filename: str) -> Response:
     if not file_path:
         raise ResourceNotFoundError(f"File '{filename}' not found for download {download_id}")
 
+    file_path = os.path.realpath(file_path)              # resolve symlinks / ..
+    if not is_safe_path(os.path.realpath(downloads_dir), file_path):
+        raise ValidationError("Access denied: file path outside allowed directory")
+
+    # Debug log (keep or remove, your choice)
+    print(f"DEBUG: Serving file {file_path} for download {download_id}")
+
     # 2. Re-validate after join – defence in depth
     if not is_safe_path(downloads_dir, file_path):
         raise ValidationError("Access denied: file path outside allowed directory")
