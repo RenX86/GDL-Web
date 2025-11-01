@@ -56,7 +56,7 @@ class Config:
             'filename': 'PostBy_{username}_{post_shortcode}_{num}.{extension}'
         },
         "wallhaven": {  # explicit if you want
-        "filename": "wallhaven_{id}.{extension}"
+            "filename": "wallhaven_{id}.{extension}"
         }
     }
 

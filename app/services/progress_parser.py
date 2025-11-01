@@ -66,8 +66,18 @@ def count_downloaded_files(stdout_lines: list) -> int:
         int: Number of files downloaded
     """
     count = 0
+    # Pattern to match gallery-dl output showing a file path
+    file_pattern = re.compile(r'.*\.(jpg|jpeg|png|gif|webp|mp4|webm|mov|avi|flv|wmv|mkv|mp3|wav|flac|txt|json|xml|pdf|html|htm|svg|bmp|ico)$', re.IGNORECASE)
+    
     for line in stdout_lines:
         # Look for lines indicating a file was downloaded
         if "Downloading" in line and " -> " in line:
             count += 1
+        # Also check for lines that contain file paths (gallery-dl often just prints the path when complete)
+        elif file_pattern.search(line.strip()):
+            # Additional check to make sure this is a download path and not just any file
+            line_lower = line.lower()
+            if any(ext in line_lower for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.webm']):
+                count += 1
+                
     return count

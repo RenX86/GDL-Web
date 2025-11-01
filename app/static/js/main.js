@@ -202,8 +202,18 @@ function createDownloadCard(download) {
     
     // Normalize status to expected values
     const status = download.status || 'pending';
-    const statusClass = status === 'completed' ? 'status-completed' : 
-                       status === 'error' || status === 'failed' ? 'status-error' : 'status-in-progress';
+    // Normalize status for UI display
+    const normalizedStatus = (() => {
+        if (['completed', 'finished'].includes(status)) return 'completed';
+        if (['error', 'failed'].includes(status)) return 'error';
+        if (['cancelled', 'canceled'].includes(status)) return 'cancelled';
+        if (['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(status)) return 'in-progress';
+        return 'in-progress'; // default for any unknown status
+    })();
+    
+    const statusClass = normalizedStatus === 'completed' ? 'status-completed' : 
+                       normalizedStatus === 'error' ? 'status-error' :
+                       normalizedStatus === 'cancelled' ? 'status-cancelled' : 'status-in-progress';
     
     // Safely get values with defaults
     const progress = Math.max(0, Math.min(100, parseInt(download.progress) || 0));
@@ -229,7 +239,7 @@ function createDownloadCard(download) {
     
     // Return HTML string instead of DOM element
     return `
-        <div class="download-card" data-download-id="${download.id}" data-status="${status}">
+        <div class="download-card" data-download-id="${download.id}" data-status="${normalizedStatus}">
             <div class="download-header">
                 <h3 title="${url}">${url.length > 50 ? url.substring(0, 50) + '...' : url}</h3>
                 <span class="status-badge ${statusClass}">${status}</span>
@@ -245,9 +255,9 @@ function createDownloadCard(download) {
                 <div class="progress-fill" style="width: ${progress}%"></div>
             </div>
             <div class="download-actions">
-                ${status === 'completed' ? `<button class="btn download-btn" onclick="showDownloadFiles('${download.id}')">View Files</button>` : ''}
+                ${normalizedStatus === 'completed' ? `<button class="btn download-btn" onclick="showDownloadFiles('${download.id}')">View Files</button>` : ''}
                 <button class="btn download-btn" onclick="deleteDownload('${download.id}')" 
-                        ${status === 'downloading' ? 'disabled title="Cannot delete while downloading"' : ''}>
+                        ${['downloading', 'starting', 'processing', 'in_progress', 'retrying'].includes(normalizedStatus) ? 'disabled title="Cannot delete while downloading"' : ''}>
                     Delete
                 </button>
             </div>
@@ -323,11 +333,40 @@ function filterDownloads(filter) {
     downloadCards.forEach(card => {
         const cardStatus = card.getAttribute('data-status');
         
-        if (filter === 'all' || filter === cardStatus) {
-            card.style.display = 'block';
+        // Map backend statuses to UI filter categories
+        let category;
+        if (['completed', 'finished'].includes(cardStatus)) {
+            category = 'completed';
+        } else if (['error', 'failed'].includes(cardStatus)) {
+            category = 'error';
+        } else if (['cancelled', 'canceled'].includes(cardStatus)) {
+            category = 'error'; // cancelled downloads are shown in error filter
+        } else if (['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(cardStatus)) {
+            category = 'in-progress';
         } else {
-            card.style.display = 'none';
+            category = 'all';
         }
+        
+        // Determine if the card should be shown based on the selected filter
+        let showCard;
+        switch(filter) {
+            case 'all':
+                showCard = true;
+                break;
+            case 'in-progress':
+                showCard = ['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(cardStatus);
+                break;
+            case 'completed':
+                showCard = ['completed', 'finished'].includes(cardStatus);
+                break;
+            case 'error':
+                showCard = ['error', 'failed', 'cancelled', 'canceled'].includes(cardStatus);
+                break;
+            default:
+                showCard = true;
+        }
+        
+        card.style.display = showCard ? 'block' : 'none';
     });
 }
 

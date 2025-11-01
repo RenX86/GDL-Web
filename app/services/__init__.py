@@ -7,6 +7,7 @@ This package contains all service classes for the application.
 from typing import Dict, Any
 from .service_registry import ServiceRegistry
 from .download_service import DownloadService
+from .download_service_adapter import DownloadServiceAdapter
 from .cookie_manager import encrypt_cookies, decrypt_cookies
 from .network_utils import (
     check_network_connectivity,
@@ -36,6 +37,7 @@ def create_download_service(config: Dict[str, Any]) -> DownloadService:
 __all__ = [
     "ServiceRegistry",
     "DownloadService",
+    "DownloadServiceAdapter",
     "encrypt_cookies",
     "decrypt_cookies",
     "check_network_connectivity",

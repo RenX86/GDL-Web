@@ -66,11 +66,24 @@ class DownloadService:
         MAX_AGE = 24 * 60 * 60   # seconds
         def _janitor():
             while True:
-                time.sleep(3600)          # run every hour
-                cutoff = datetime.now().timestamp() - MAX_AGE
-                for did, st in list(self._list_status_copy().items()):
-                    if st.get("end_time") and datetime.fromisoformat(st["end_time"]).timestamp() < cutoff:
-                        self.delete_download(did)
+                try:
+                    time.sleep(3600)          # run every hour
+                    cutoff = datetime.now().timestamp() - MAX_AGE
+                    # Create a copy of keys to avoid issues during iteration
+                    download_ids = list(self.download_status.keys())
+                    for did in download_ids:
+                        st = self._get_status_copy(did)
+                        if st and st.get("end_time"):
+                            try:
+                                end_time = datetime.fromisoformat(st["end_time"])
+                                if end_time.timestamp() < cutoff:
+                                    self.delete_download(did)
+                            except ValueError:
+                                # Handle invalid date format
+                                self.logger.warning(f"Invalid date format for download {did}, removing anyway")
+                                self.delete_download(did)
+                except Exception as e:
+                    self.logger.error(f"Error in janitor thread: {e}")
         threading.Thread(target=_janitor, daemon=True, name="janitor").start()
 
     def _set_status(self, download_id: str, **kwargs) -> None:
@@ -314,7 +327,8 @@ class DownloadService:
                 network_error_detected = False
                 files_so_far = 0
 
-                while t_stdout.is_alive() or t_stderr.is_alive() or not q_stdout.empty() or not q_stderr.empty():
+                # Continue reading while process is running or threads are alive
+                while process.poll() is None or t_stdout.is_alive() or t_stderr.is_alive() or not q_stdout.empty() or not q_stderr.empty():
                     try:
                         line = q_stdout.get_nowait()
                         stdout_lines.append(line.strip())
@@ -336,10 +350,12 @@ class DownloadService:
                     except Empty:
                         pass
 
+                    # Small sleep to prevent excessive CPU usage
                     time.sleep(0.1)
 
                 # ======  WAIT FOR TERMINATION  ======
                 process.wait()
+                # Safely remove from active processes
                 self.active_processes.pop(download_id, None)
 
                 # ----------  GUARD #1  ----------
@@ -460,11 +476,12 @@ class DownloadService:
             if cookie_file_path and os.path.exists(cookie_file_path):
                 os.remove(cookie_file_path)
 
-            # Remove the temporary decrypted cookie file
-            temp_cookie_path = os.path.join(self.cookies_dir, ".temp_cookies.txt")
-            if os.path.exists(temp_cookie_path):
-                os.remove(temp_cookie_path)
-                self.logger.info("Removed temporary cookie file: %s", temp_cookie_path)
+            # Remove the temporary decrypted cookie file (use the dynamically created path)
+            if cookies_content and self.encryption_key:
+                temp_cookie_path = os.path.join(self.cookies_dir, f".temp_{download_id}.txt")
+                if os.path.exists(temp_cookie_path):
+                    os.remove(temp_cookie_path)
+                    self.logger.info("Removed temporary cookie file: %s", temp_cookie_path)
         except Exception as e:
             self.logger.error(f"Error removing cookie files: {str(e)}")
 
@@ -518,9 +535,19 @@ class DownloadService:
 
     def cancel_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:
-            process = self.active_processes.pop(download_id)
+            process = self.active_processes[download_id]
             try:
                 process.terminate()
+                # Wait briefly for process to terminate gracefully
+                try:
+                    process.wait(timeout=2)  # Wait up to 2 seconds
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't terminate gracefully
+                    process.kill()
+                
+                # Remove from active processes
+                self.active_processes.pop(download_id, None)
+                
                 self._set_status(
                     download_id,
                     status="cancelled",
@@ -530,6 +557,8 @@ class DownloadService:
                 return True
             except Exception as e:
                 self.logger.error("Error cancelling %s: %s", download_id, e)
+                # Still remove from active processes even if terminate fails
+                self.active_processes.pop(download_id, None)
         return False
 
     def get_all_downloads(self) -> List[Dict[str, Any]]:
@@ -571,11 +600,17 @@ class DownloadService:
 
     def delete_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:
-            process = self.active_processes[download_id]   # peek, not pop
-            try:
-                process.terminate()
-            finally:
-                self.active_processes.pop(download_id, None)
+            self.active_processes.pop(download_id).terminate()
+        self.delete_download_files(download_id)
+        self._pop_status(download_id)
+        # cookie cleanup
+        try:
+            enc = os.path.join(self.cookies_dir, f"{download_id}.txt")
+            if os.path.exists(enc):
+                os.remove(enc)
+        except Exception as e:
+            self.logger.error("Cookie cleanup %s: %s", download_id, e)
+        return True
 
     def clear_history(self, session_id: Optional[str] = None) -> None:
         if session_id:
@@ -584,13 +619,23 @@ class DownloadService:
             for did in to_remove:
                 self.delete_download(did)
         else:
-            for p in list(self.active_processes.values()):
+            # Terminate all active processes
+            process_list = list(self.active_processes.items())
+            for download_id, process in process_list:
                 try:
-                    p.terminate()
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)  # Wait up to 2 seconds
+                    except subprocess.TimeoutExpired:
+                        # Force kill if it doesn't terminate gracefully
+                        process.kill()
                 except Exception:
-                    pass
+                    pass  # Process may have already terminated
             self.active_processes.clear()
+            
+            # Remove all statuses
             for did in list(self._list_status_copy().keys()):
+                # Only call delete_download to ensure proper cleanup
                 self.delete_download(did)
 
     def get_statistics(self) -> Dict[str, Any]:

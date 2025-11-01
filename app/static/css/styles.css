@@ -258,6 +258,11 @@ input[type="url"]:focus, input[type="file"]:focus {
     color: #b91c1c;
 }
 
+.status-badge.cancelled {
+    background-color: #e2e3e5;
+    color: #495057;
+}
+
 .progress-container {
     margin: 1rem 0;
     background-color: #f3f4f6;
@@ -454,6 +459,8 @@ input[type="url"]:focus, input[type="file"]:focus {
 .status-downloading { background: #d4edda; color: #155724; }
 .status-completed { background: #d1ecf1; color: #0c5460; }
 .status-failed { background: #f8d7da; color: #721c24; }
+.status-cancelled { background: #e2e3e5; color: #383d41; }
+.status-cancelled { background: #e2e3e5; color: #383d41; }
 
 .progress-bar {
     width: 100%;

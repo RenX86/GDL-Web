@@ -133,7 +133,7 @@ class DownloadServiceAdapter:
         session_downloads[download_id] = {
             'id': download_id,
             'url': url,
-            'start_time': self._service.download_status.get(download_id, {}).get('start_time'),
+            'start_time': self._service._get_status_copy(download_id).get('start_time') if self._service._get_status_copy(download_id) else None,
             'session_id': session.get('session_id'),
             'output_dir': output_dir  # Track the output directory for this download
         }
@@ -317,12 +317,12 @@ class DownloadServiceAdapter:
         session_download_list = self.list_all_downloads()
         
         total_downloads = len(session_download_list)
-        completed_downloads = sum(1 for d in session_download_list if d.get('status') == 'completed')
-        failed_downloads = sum(1 for d in session_download_list if d.get('status') == 'failed')
-        active_downloads = sum(1 for d in session_download_list if d.get('status') == 'downloading')
+        completed_downloads = sum(1 for d in session_download_list if d.get('status') in ['completed', 'finished'])
+        failed_downloads = sum(1 for d in session_download_list if d.get('status') in ['failed', 'error'])
+        active_downloads = sum(1 for d in session_download_list if d.get('status') in ['downloading', 'starting', 'processing', 'in_progress'])
         
         return {
-            'total_downloads': total,
+            'total_downloads': total_downloads,
             'completed_downloads': completed_downloads,
             'failed_downloads': failed_downloads,
             'active_downloads': active_downloads,

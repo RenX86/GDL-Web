@@ -24,7 +24,7 @@ def start_download() -> Response:
     cookies_content = data.get("cookies")
 
     # Get download service from registry
-    download_service = current_app.service_registry.get("download_service")  # type: ignore  # type: ignore  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
 
     # Validate URL format
     if not download_service.is_valid_url(url):
@@ -48,7 +48,7 @@ def start_download() -> Response:
 @handle_api_errors
 def get_download_status(download_id: str) -> Response:
     """Get status of a specific download"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -85,7 +85,7 @@ def get_download_status(download_id: str) -> Response:
 @handle_api_errors
 def list_all_downloads() -> Response:
     """List all downloads"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
     downloads = download_service.list_all_downloads()
 
     # Ensure consistent data structure with all required fields
@@ -120,7 +120,7 @@ def list_all_downloads() -> Response:
 @handle_api_errors
 def delete_download(download_id: str) -> Response:
     """Delete a specific download"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -136,7 +136,7 @@ def delete_download(download_id: str) -> Response:
 @handle_api_errors
 def clear_download_history() -> Response:
     """Clear all download history"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
     download_service.clear_history()
 
     return jsonify(
@@ -148,7 +148,7 @@ def clear_download_history() -> Response:
 @handle_api_errors
 def clear_session() -> Response:
     """Clear the entire user session"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
     session_id = session.get("session_id")
     if session_id:
         download_service.clear_history(session_id=session_id)
@@ -160,7 +160,7 @@ def clear_session() -> Response:
 @handle_api_errors
 def cancel_download(download_id: str) -> Response:
     """Cancel an active download"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -176,7 +176,7 @@ def cancel_download(download_id: str) -> Response:
 @handle_api_errors
 def get_statistics() -> Response:
     """Get download statistics"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
     stats = download_service.get_statistics()
 
     return jsonify({"success": True, "data": stats})
@@ -199,7 +199,7 @@ def get_app_config() -> Response:
 @handle_api_errors
 def list_download_files(download_id: str) -> Response:
     """List all files for a specific download"""
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -216,21 +216,14 @@ def list_download_files(download_id: str) -> Response:
     # Get the output directory for this download
     output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
     
-    # Create a specific directory for this download if it doesn't exist
-    download_dir = os.path.join(output_dir, download_id)
-    
-    # If the specific download directory doesn't exist, try to find files in the main downloads directory
-    if not os.path.exists(download_dir):
-        # Try to find files that might be related to this download
-        files = []
-        if os.path.exists(output_dir):
-            # Look for files that might be related to this download
-            all_files = list_directory_contents(output_dir, recursive=True)
-            # Filter files that might belong to this download (based on timestamp or other criteria)
-            # For now, return all files in the downloads directory
-            files = all_files
-    else:
+    # Use the actual output directory where files were saved, not a download-specific subdirectory
+    download_dir = output_dir
+
+    # List files in the actual output directory
+    if os.path.exists(download_dir):
         files = list_directory_contents(download_dir, recursive=True)
+    else:
+        files = []
 
     # Format file information for frontend
     formatted_files = []
@@ -260,7 +253,7 @@ def download_file(download_id: str, filename: str) -> Response:
     # 1. Strip path traversal sequences and sanitise
     filename = sanitize_filename(filename)
 
-    download_service = current_app.service_registry.get("download_service")  # type: ignore
+    download_service = current_app.service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -282,19 +275,20 @@ def download_file(download_id: str, filename: str) -> Response:
     # Get the absolute path to downloads directory
     downloads_dir = os.path.abspath(current_app.config["DOWNLOADS_DIR"])
     
-    # Look for the file in the download-specific directory first
-    download_dir = os.path.join(downloads_dir, download_id)
+    # Use the actual output directory from the download status (already retrieved earlier)
+    actual_output_dir = status.get("output_dir", downloads_dir)
+    actual_output_dir = os.path.abspath(actual_output_dir)
+    
+    # Look for the file in the actual output directory
     file_path = None
+    potential_path = os.path.join(actual_output_dir, filename)
+    if os.path.exists(potential_path) and os.path.isfile(potential_path):
+        file_path = potential_path
     
-    # Check in download-specific directory
-    if os.path.exists(download_dir):
-        potential_path = os.path.join(download_dir, filename)
-        if os.path.exists(potential_path) and os.path.isfile(potential_path):
-            file_path = potential_path
-    
-    # If not found in specific directory, search in the main downloads directory
+    # If not found in the actual output directory, search recursively in the downloads directory
+    # This handles potential edge cases where file locations may vary
     if not file_path and os.path.exists(downloads_dir):
-        # Search recursively for the file
+        # Search recursively for the file in the main downloads directory
         for root, dirs, files in os.walk(downloads_dir):
             if filename in files:
                 potential_path = os.path.join(root, filename)
@@ -305,22 +299,15 @@ def download_file(download_id: str, filename: str) -> Response:
     if not file_path:
         raise ResourceNotFoundError(f"File '{filename}' not found for download {download_id}")
 
-    file_path = os.path.realpath(file_path)              # resolve symlinks / ..
-    if not is_safe_path(os.path.realpath(downloads_dir), file_path):
-        raise ValidationError("Access denied: file path outside allowed directory")
-
-    # Debug log (keep or remove, your choice)
-    print(f"DEBUG: Serving file {file_path} for download {download_id}")
-
     # 2. Re-validate after join – defence in depth
-    if not is_safe_path(downloads_dir, file_path):
+    if not is_safe_path(actual_output_dir, file_path):
         raise ValidationError("Access denied: file path outside allowed directory")
     
     # Debug: Print the paths being used
     print(f"DEBUG: file_path={file_path}")
     print(f"DEBUG: downloads_dir={downloads_dir}")
     print(f"DEBUG: filename={filename}")
-    print(f"DEBUG: download_dir={download_dir}")
+    print(f"DEBUG: actual_output_dir={actual_output_dir}")
     
     # Serve the file securely
-    return secure_file_serve(file_path, downloads_dir, filename)
+    return secure_file_serve(file_path, actual_output_dir, filename)
