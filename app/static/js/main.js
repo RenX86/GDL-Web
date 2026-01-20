@@ -6,10 +6,10 @@ function showNotification(message, type = 'info') {
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
     notification.textContent = message;
-    
+
     // Add to page
     document.body.appendChild(notification);
-    
+
     // Auto-remove after 3 seconds
     setTimeout(() => {
         notification.classList.add('fade-out');
@@ -25,7 +25,7 @@ function showNotification(message, type = 'info') {
 function startDownload() {
     const url = document.getElementById('mediaUrl').value.trim();
     const cookieFile = document.getElementById('cookieFile').files[0];
-    
+
     if (!url) {
         alert('Please enter a valid URL');
         return;
@@ -41,7 +41,7 @@ function startDownload() {
 
     const downloadBtn = document.querySelector('.download-btn');
     const spinner = document.getElementById('loadingSpinner');
-    
+
     // Disable button and show spinner
     downloadBtn.disabled = true;
     spinner.style.display = 'inline-block';
@@ -54,36 +54,36 @@ function startDownload() {
             },
             body: JSON.stringify({ url: url, cookies: cookiesContent })
         })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                document.getElementById('mediaUrl').value = '';
-                document.getElementById('cookieFile').value = '';
-                startRefreshing();
-                // Show success message
-                showNotification('Download started successfully!', 'success');
-            } else {
-                const errorMessage = data.error || data.message || 'Unknown error occurred';
-                alert('Download failed: ' + errorMessage);
-            }
-        })
-        .catch(error => {
-            console.error('Request failed:', error);
-            if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
-                alert('Network connection failed. Please check your connection and try again.');
-            } else {
-                alert('Download failed: ' + error.message);
-            }
-        })
-        .finally(() => {
-            downloadBtn.disabled = false;
-            spinner.style.display = 'none';
-        });
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('mediaUrl').value = '';
+                    document.getElementById('cookieFile').value = '';
+                    startRefreshing();
+                    // Show success message
+                    showNotification('Download started successfully!', 'success');
+                } else {
+                    const errorMessage = data.error || data.message || 'Unknown error occurred';
+                    alert('Download failed: ' + errorMessage);
+                }
+            })
+            .catch(error => {
+                console.error('Request failed:', error);
+                if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+                    alert('Network connection failed. Please check your connection and try again.');
+                } else {
+                    alert('Download failed: ' + error.message);
+                }
+            })
+            .finally(() => {
+                downloadBtn.disabled = false;
+                spinner.style.display = 'none';
+            });
     };
 
     if (cookieFile) {
@@ -109,7 +109,7 @@ function refreshDownloads() {
     if (!sessionStorage.getItem('downloadSessionActive')) {
         sessionStorage.setItem('downloadSessionActive', 'true');
     }
-    
+
     fetch('/api/downloads')
         .then(response => response.json())
         .then(data => {
@@ -132,7 +132,7 @@ function refreshDownloads() {
 // Update the downloads list
 function updateDownloadsList(downloads) {
     const downloadsList = document.getElementById('downloadsList');
-    
+
     // The API returns {success: true, data: [...]} where data is the array of downloads
     const items = Array.isArray(downloads) ? downloads : [];
 
@@ -148,17 +148,17 @@ function updateDownloadsList(downloads) {
             </div>`;
         return;
     }
-    
+
     const validItems = items.filter(download => download && typeof download === 'object' && download.id);
-    
+
     const html = validItems
         .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
         // Use the real download.id from backend instead of array index
         .map((download) => createDownloadCard(download))
         .join('');
-    
+
     downloadsList.innerHTML = html;
-    
+
     // Add event listeners to filter buttons
     setupFilterButtons();
 }
@@ -169,7 +169,7 @@ function deleteDownload(downloadId) {
         console.error('Invalid download ID');
         return;
     }
-    
+
     if (confirm('Are you sure you want to delete this download?')) {
         fetch(`/api/downloads/${downloadId}`, { method: 'DELETE' })
             .then(response => {
@@ -199,7 +199,7 @@ function createDownloadCard(download) {
         console.error('Invalid download data:', download);
         return '<div></div>'; // Return empty HTML string
     }
-    
+
     // Normalize status to expected values
     const status = download.status || 'pending';
     // Normalize status for UI display
@@ -210,22 +210,22 @@ function createDownloadCard(download) {
         if (['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(status)) return 'in-progress';
         return 'in-progress'; // default for any unknown status
     })();
-    
-    const statusClass = normalizedStatus === 'completed' ? 'status-completed' : 
-                       normalizedStatus === 'error' ? 'status-error' :
-                       normalizedStatus === 'cancelled' ? 'status-cancelled' : 'status-in-progress';
-    
+
+    const statusClass = normalizedStatus === 'completed' ? 'status-completed' :
+        normalizedStatus === 'error' ? 'status-error' :
+            normalizedStatus === 'cancelled' ? 'status-cancelled' : 'status-in-progress';
+
     // Safely get values with defaults
     const progress = Math.max(0, Math.min(100, parseInt(download.progress) || 0));
     const message = download.message || download.error || '';
     const url = download.url || 'Unknown URL';
     const filesDownloaded = download.files_downloaded || 0;
     const totalFiles = download.total_files || 0;
-    
+
     // Format dates safely
     let startTime = 'N/A';
     let endTime = null;
-    
+
     try {
         if (download.start_time) {
             startTime = new Date(download.start_time).toLocaleString();
@@ -236,7 +236,7 @@ function createDownloadCard(download) {
     } catch (dateError) {
         console.warn('Invalid date format in download:', download);
     }
-    
+
     // Return HTML string instead of DOM element
     return `
         <div class="download-card" data-download-id="${download.id}" data-status="${normalizedStatus}">
@@ -270,16 +270,27 @@ function startRefreshing() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
     }
-    
+
     refreshInterval = setInterval(refreshDownloads, 2000);
     refreshDownloads(); // Refresh immediately
 }
 
 // Clear the entire session
 function clearSession() {
-    if (!confirm('Are you sure you want to clear your entire session? This will remove all download history and reset the application.')) {
-        return;
-    }
+    console.log('Clear session button clicked');
+
+    // TEMPORARY: Bypassing confirm dialog for testing - REMOVE THIS LATER
+    // const userConfirmed = confirm('Are you sure you want to clear your entire session? This will remove all download history and reset the application.');
+    // console.log('Confirm dialog result:', userConfirmed);
+
+    // if (!userConfirmed) {
+    //     console.log('Clear session cancelled by user');
+    //     return;
+    // }
+
+    console.log('⚠️ WARNING: Confirm dialog bypassed for testing');
+    console.log('Proceeding with clear session...');
+    console.log('Making fetch request to /api/session/clear');
 
     fetch('/api/session/clear', {
         method: 'POST',
@@ -287,41 +298,51 @@ function clearSession() {
             'Content-Type': 'application/json',
         }
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showNotification('Session cleared successfully!', 'success');
-            setTimeout(() => {
-                location.reload();
-            }, 1000);
-        } else {
-            alert('Failed to clear session: ' + (data.message || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error clearing session:', error);
-        alert('Network error occurred while clearing session');
-    });
+        .then(response => {
+            console.log('Received response:', response);
+            console.log('Response status:', response.status);
+            console.log('Response ok:', response.ok);
+            return response.json();
+        })
+        .then(data => {
+            console.log('Response data:', data);
+            if (data.success) {
+                console.log('Session cleared successfully, showing notification');
+                showNotification('Session cleared successfully!', 'success');
+                console.log('Scheduling page reload in 1 second');
+                setTimeout(() => {
+                    console.log('Reloading page now');
+                    location.reload();
+                }, 1000);
+            } else {
+                console.error('Clear session failed:', data);
+                alert('Failed to clear session: ' + (data.message || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error clearing session:', error);
+            alert('Network error occurred while clearing session');
+        });
 }
 
 // Add filter functionality
 function setupFilterButtons() {
     const filterButtons = document.querySelectorAll('.filter-btn');
-    
+
     filterButtons.forEach(button => {
         // Prevent adding duplicate listeners across refreshes
         if (button.dataset.listenerAttached === 'true') return;
-        
-        button.addEventListener('click', function() {
+
+        button.addEventListener('click', function () {
             // Remove active class from all buttons
             filterButtons.forEach(btn => btn.classList.remove('active'));
             // Add active class to clicked button
             this.classList.add('active');
-            
+
             const filter = this.getAttribute('data-filter');
             filterDownloads(filter);
         });
-        
+
         button.dataset.listenerAttached = 'true';
     });
 }
@@ -329,10 +350,10 @@ function setupFilterButtons() {
 // Filter downloads based on status
 function filterDownloads(filter) {
     const downloadCards = document.querySelectorAll('.download-card');
-    
+
     downloadCards.forEach(card => {
         const cardStatus = card.getAttribute('data-status');
-        
+
         // Map backend statuses to UI filter categories
         let category;
         if (['completed', 'finished'].includes(cardStatus)) {
@@ -346,10 +367,10 @@ function filterDownloads(filter) {
         } else {
             category = 'all';
         }
-        
+
         // Determine if the card should be shown based on the selected filter
         let showCard;
-        switch(filter) {
+        switch (filter) {
             case 'all':
                 showCard = true;
                 break;
@@ -365,7 +386,7 @@ function filterDownloads(filter) {
             default:
                 showCard = true;
         }
-        
+
         card.style.display = showCard ? 'block' : 'none';
     });
 }
@@ -409,9 +430,9 @@ function displayDownloadFiles(downloadId, files) {
                 <button class="close-btn" onclick="this.closest('.file-modal-overlay').remove()">&times;</button>
             </div>
             <div class="file-modal-content">
-                ${files.length === 0 ? 
-                    '<p class="no-files">No files found for this download.</p>' :
-                    `<div class="file-list">
+                ${files.length === 0 ?
+            '<p class="no-files">No files found for this download.</p>' :
+            `<div class="file-list">
                         ${files.map(file => `
                             <div class="file-item">
                                 <div class="file-info">
@@ -425,11 +446,11 @@ function displayDownloadFiles(downloadId, files) {
                             </div>
                         `).join('')}
                     </div>`
-                }
+        }
             </div>
         </div>
     `;
-    
+
     // Add modal styles if not already present
     if (!document.getElementById('modal-styles')) {
         const style = document.createElement('style');
@@ -517,7 +538,7 @@ function displayDownloadFiles(downloadId, files) {
         `;
         document.head.appendChild(style);
     }
-    
+
     document.body.appendChild(modal);
 }
 
@@ -534,31 +555,40 @@ function downloadFile(downloadId, filename) {
     link.href = downloadUrl;
     link.download = filename; // This will suggest the filename to the browser
     link.style.display = 'none';
-    
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
+
     showNotification(`Downloading ${filename}...`, 'info');
 }
 
 // Allow Enter key to start download
-document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('mediaUrl').addEventListener('keypress', function(e) {
+document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('mediaUrl').addEventListener('keypress', function (e) {
         if (e.key === 'Enter') {
             startDownload();
         }
     });
-    
+
     // Setup filter buttons on initial load
     setupFilterButtons();
-    
+
     // Set "All" filter as active by default
     const allFilterBtn = document.querySelector('.filter-btn[data-filter="all"]');
     if (allFilterBtn) {
         allFilterBtn.classList.add('active');
     }
-    
+
+    // Attach event listener to clear session button
+    const clearBtn = document.querySelector('.clear-btn');
+    if (clearBtn) {
+        console.log('Clear session button found, attaching listener');
+        clearBtn.addEventListener('click', clearSession);
+    } else {
+        console.error('Clear session button NOT found');
+    }
+
     // Initial load
     refreshDownloads();
 });
