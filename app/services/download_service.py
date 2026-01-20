@@ -12,6 +12,7 @@ import os
 import uuid
 import logging
 import shutil
+import json
 from threading import RLock
 from datetime import datetime
 from typing import Optional, Dict, List, Any, List
@@ -23,7 +24,7 @@ from .network_utils import (
     is_network_error,
 )
 from .cookie_manager import encrypt_cookies, decrypt_cookies
-from .progress_parser import parse_progress, count_downloaded_files
+from .progress_parser import parse_progress, count_downloaded_files, extract_downloaded_files
 
 
 class DownloadService:
@@ -88,7 +89,7 @@ class DownloadService:
             return self.download_status.pop(download_id, None)
     
     @contextmanager
-    def _managed_subprocess(self, process: subprocess.Popen, threads: List[threading.Thread], download_id: str):
+    def _managed_subprocess(self, process: subprocess.Popen, threads: List[threading.Thread], download_id: str) -> Any:
         """
         Context manager for subprocess lifecycle management.
         
@@ -366,16 +367,32 @@ class DownloadService:
 
                 # ======  BUILD COMMAND  ======
                 cmd = ['gallery-dl']
+                
+                # Create a temporary config file for this download
                 gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
+                temp_config_path = os.path.join(self.cookies_dir, f"config_{download_id}.json")
+                
+                # Structure the config correctly for gallery-dl
+                # Specific extractors like 'instagram' should be nested under 'extractor'
+                final_config: Dict[str, Any] = {"extractor": {}}
+                
                 if isinstance(gallery_dl_config, dict):
-                    for section, settings in gallery_dl_config.items():
-                        if isinstance(settings, dict):
-                            for key, value in settings.items():
-                                if isinstance(value, bool) and value:
-                                    cmd.append(f'--{key}')
-                                elif not isinstance(value, bool) and value is not None:
-                                    cmd.extend([f'--{key}', str(value)])
-
+                    for key, value in gallery_dl_config.items():
+                        if key == "extractor" and isinstance(value, dict):
+                            # Merge existing extractor config
+                            final_config["extractor"].update(value)
+                        else:
+                            # Move top-level extractor keys (like 'instagram') into 'extractor'
+                            final_config["extractor"][key] = value
+                
+                try:
+                    with open(temp_config_path, 'w') as f:
+                        json.dump(final_config, f, indent=2)
+                    cmd.extend(['--config', temp_config_path])
+                except Exception as e:
+                    self.logger.error(f"Failed to create temp config file: {e}")
+                    # Fallback to no config if writing fails, or maybe just log it
+                
                 cmd.extend(['--sleep', '2-4'])
                 cmd.extend(['-D', output_dir])
                 cmd.append('--verbose')
@@ -473,9 +490,11 @@ class DownloadService:
                             line = q_stdout.get_nowait()
                             stdout_lines.append(line.strip())
                             self.logger.info(f"[gallery-dl-stdout] {line.strip()}")
-                            files_so_far = parse_progress(
-                                self.download_status, download_id, line, files_so_far
-                            )
+                            
+                            files_so_far, updates = parse_progress(line, files_so_far)
+                            if updates:
+                                self._set_status(download_id, **updates)
+                                
                             if any(err in line.lower() for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]):
                                 network_error_detected = True
                             output_received = True
@@ -532,6 +551,7 @@ class DownloadService:
                     return_code = process.returncode if process else None
                 
                 if return_code == 0:
+                    files_list = extract_downloaded_files(stdout_lines)
                     self._set_status(
                         download_id,
                         status="completed",
@@ -539,13 +559,17 @@ class DownloadService:
                         progress=100,
                         end_time=datetime.now().isoformat(),
                         output="\n".join(stdout_lines),
-                        files_downloaded=count_downloaded_files(stdout_lines),
+                        files_downloaded=len(files_list),
+                        downloaded_files_list=files_list,
                         retry_count=retry_count,
                     )
+                    
+                    status = self._get_status_copy(download_id)
+                    files_count = status.get("files_downloaded", 0) if status else 0
                     self.logger.info(
                         "Download %s completed: %s files downloaded",
                         download_id,
-                        self.download_status[download_id].get("files_downloaded", 0),
+                        files_count,
                     )
                     break
 
@@ -660,8 +684,17 @@ class DownloadService:
                         self.logger.info("Removed temporary cookie file: %s", temp_cookie_path)
                     except OSError as e:
                         self.logger.warning(f"Failed to remove temporary cookie file: {e}")
+            
+            # Remove temporary config file
+            temp_config_path = os.path.join(self.cookies_dir, f"config_{download_id}.json")
+            if os.path.exists(temp_config_path):
+                try:
+                    os.remove(temp_config_path)
+                    self.logger.info("Removed temporary config file: %s", temp_config_path)
+                except OSError as e:
+                    self.logger.warning(f"Failed to remove temporary config file: {e}")
         except Exception as e:
-            self.logger.error(f"Error removing cookie files: {str(e)}")
+            self.logger.error(f"Error removing cookie/config files: {str(e)}")
 
     def _is_retriable_error(self, error_message: str) -> bool:
         """
@@ -775,13 +808,34 @@ class DownloadService:
             download_id (str): The ID of the download to delete.
         """
         if download_id in self.download_status:
-            output_dir = self.download_status[download_id].get("output_dir")
+            status = self.download_status[download_id]
+            files = status.get("downloaded_files_list", [])
+            output_dir = status.get("output_dir")
+            
+            # Strategy 1: Delete specific files if known
+            if files:
+                for file_path in files:
+                    try:
+                        # Handle both absolute and relative paths
+                        full_path = os.path.abspath(file_path)
+                        if os.path.exists(full_path):
+                            os.remove(full_path)
+                            self.logger.info(f"Deleted file: {full_path}")
+                    except Exception as e:
+                        self.logger.error(f"Error deleting file {file_path}: {e}")
+                return
+
+            # Strategy 2: Legacy fallback (Safety check)
+            # Only delete output_dir if it looks like a dedicated directory (not shared)
+            # This is hard to guarantee, so we default to safety and log a warning.
+            # If the user really wants to delete the folder, they can manage it manually or we need better tracking.
             if output_dir and os.path.exists(output_dir):
-                try:
-                    shutil.rmtree(output_dir)
-                    self.logger.info(f"Deleted download directory: {output_dir}")
-                except Exception as e:
-                    self.logger.error(f"Error deleting download directory {output_dir}: {e}")
+                self.logger.warning(f"Skipping directory deletion for {download_id}: exact file list not available and bulk deletion is unsafe.")
+                # The previous behavior was:
+                # shutil.rmtree(output_dir)
+                # This is likely what was causing the "backend still has file" if rmtree failed silently,
+                # OR it was working but deleting TOO MUCH (if it worked).
+                # Since the user says files REMAIN, rmtree was likely failing (locked files?) or simply not called.
 
     def delete_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:

@@ -5,6 +5,7 @@ This module contains all API routes for the application.
 """
 
 from flask import Blueprint, request, jsonify, current_app, Response, send_file, session
+from typing import cast, Any
 from ..utils import handle_api_errors, validate_required_fields, secure_file_serve, list_directory_contents, get_file_info, format_file_size, is_safe_path, sanitize_filename
 from ..models.config import AppConfig
 from ..exceptions import ResourceNotFoundError, ValidationError
@@ -24,7 +25,7 @@ def start_download() -> Response:
     cookies_content = data.get("cookies")
 
     # Get download service from registry
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
 
     # Validate URL format
     if not download_service.is_valid_url(url):
@@ -48,7 +49,7 @@ def start_download() -> Response:
 @handle_api_errors
 def get_download_status(download_id: str) -> Response:
     """Get status of a specific download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -85,7 +86,7 @@ def get_download_status(download_id: str) -> Response:
 @handle_api_errors
 def list_all_downloads() -> Response:
     """List all downloads"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
     downloads = download_service.list_all_downloads()
 
     # Ensure consistent data structure with all required fields
@@ -120,7 +121,7 @@ def list_all_downloads() -> Response:
 @handle_api_errors
 def delete_download(download_id: str) -> Response:
     """Delete a specific download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -136,7 +137,7 @@ def delete_download(download_id: str) -> Response:
 @handle_api_errors
 def clear_download_history() -> Response:
     """Clear all download history"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
     download_service.clear_history()
 
     return jsonify(
@@ -148,7 +149,7 @@ def clear_download_history() -> Response:
 @handle_api_errors
 def clear_session() -> Response:
     """Clear the entire user session"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
     session_id = session.get("session_id")
     if session_id:
         download_service.clear_history(session_id=session_id)
@@ -160,7 +161,7 @@ def clear_session() -> Response:
 @handle_api_errors
 def cancel_download(download_id: str) -> Response:
     """Cancel an active download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -176,7 +177,7 @@ def cancel_download(download_id: str) -> Response:
 @handle_api_errors
 def get_statistics() -> Response:
     """Get download statistics"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
     stats = download_service.get_statistics()
 
     return jsonify({"success": True, "data": stats})
@@ -187,19 +188,19 @@ def get_statistics() -> Response:
 def get_app_config() -> Response:
     """Get relevant app configuration for frontend"""
     app_config = AppConfig(
-        max_file_size=current_app.config["MAX_CONTENT_LENGTH"],
-        downloads_dir=os.path.basename(current_app.config["DOWNLOADS_DIR"]),
-        debug_mode=current_app.config.get("DEBUG", False),
+        max_file_size=cast(int, current_app.config["MAX_CONTENT_LENGTH"]),
+        downloads_dir=os.path.basename(cast(str, current_app.config["DOWNLOADS_DIR"])),
+        debug_mode=cast(bool, current_app.config.get("DEBUG", False)),
     )
 
-    return jsonify({"success": True, "data": app_config.to_dict()})
+    return cast(Response, jsonify({"success": True, "data": app_config.to_dict()}))
 
 
 @api_bp.route("/files/<download_id>", methods=["GET"])
 @handle_api_errors
 def list_download_files(download_id: str) -> Response:
     """List all files for a specific download"""
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
@@ -253,7 +254,7 @@ def download_file(download_id: str, filename: str) -> Response:
     # 1. Strip path traversal sequences and sanitise
     filename = sanitize_filename(filename)
 
-    download_service = current_app.service_registry.get("download_service")
+    download_service = cast(Any, current_app).service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")

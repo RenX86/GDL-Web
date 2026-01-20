@@ -32,34 +32,40 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 ## 🚀 Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/RenX86/GDL-Web.git
    cd GDL-Web
    ```
 
 2. **Create a virtual environment:**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. **Install Python dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 4. **Install gallery-dl (if not already installed):**
+
    ```bash
    pip install gallery-dl
    ```
 
 5. **Set up environment variables:**
+
    ```bash
    cp .env.example .env
    # Edit .env to add your secret keys and configuration
    ```
 
 6. **Run the application:**
+
    ```bash
    python run.py
    ```
@@ -71,6 +77,7 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 The application is configured for deployment to Render.com:
 
 1. **Using Gunicorn:**
+
    ```bash
    gunicorn --bind 0.0.0.0:$PORT run:app
    ```
@@ -85,19 +92,23 @@ The application is configured for deployment to Render.com:
 ## 📖 Usage
 
 ### Basic Download
+
 1. Enter the URL of the gallery or media you want to download
 2. Optionally upload a cookie file for authenticated content
 3. Click "Download Media"
 4. Monitor progress in real-time
 
 ### Cookie Support
+
 For platforms requiring authentication:
+
 1. Extract cookies from your browser (using extensions like "Export Cookies" or "Cookie Editor")
 2. Save as a Netscape-format text file
 3. Upload the cookie file during download
 4. Cookies are encrypted and stored securely
 
 ### Managing Downloads
+
 - Filter downloads by status (All, In Progress, Completed, Failed)
 - Delete individual downloads or clear all history
 - View and download completed files
@@ -108,6 +119,7 @@ For platforms requiring authentication:
 The application follows a service-oriented architecture with the following components:
 
 ### Backend Structure
+
 ```
 app/
 ├── __init__.py          # Application factory
@@ -131,6 +143,7 @@ app/
 ```
 
 ### Frontend Structure
+
 ```
 app/static/
 ├── css/styles.css       # Styling for the interface
@@ -173,6 +186,7 @@ app/templates/
 ## 🧪 Testing
 
 Run the test suite:
+
 ```bash
 npm test
 # or

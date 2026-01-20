@@ -6,55 +6,56 @@ import os
 import hashlib
 import mimetypes
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Callable, TypeVar, cast
 from functools import wraps
 from flask import jsonify, Response, request, send_file
 from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
 from .exceptions import ValidationError, ResourceNotFoundError
 
+T = TypeVar("T", bound=Callable[..., Any])
 
-def handle_api_errors(f):
+def handle_api_errors(f: T) -> T:
     """Decorator to handle API errors consistently."""
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated_function(*args: Any, **kwargs: Any) -> Response:
         try:
-            return f(*args, **kwargs)
+            return cast(Response, f(*args, **kwargs))
         except ValidationError as e:
-            return jsonify({"success": False, "error": str(e)}), 400
+            return cast(Response, (jsonify({"success": False, "error": str(e)}), 400))
         except ResourceNotFoundError as e:
-            return jsonify({"success": False, "error": str(e)}), 404
+            return cast(Response, (jsonify({"success": False, "error": str(e)}), 404))
         except ValueError as e:
-            return jsonify({"success": False, "error": str(e)}), 400
+            return cast(Response, (jsonify({"success": False, "error": str(e)}), 400))
         except Exception as e:
             # Log the error for debugging
             import logging
             logging.error(f"API Error in {f.__name__}: {str(e)}", exc_info=True)
-            return jsonify({"success": False, "error": "Internal server error"}), 500
-    return decorated_function
+            return cast(Response, (jsonify({"success": False, "error": "Internal server error"}), 500))
+    return cast(T, decorated_function)
 
 
-def validate_required_fields(required_fields: List[str]):
+def validate_required_fields(required_fields: List[str]) -> Callable[[T], T]:
     """Decorator to validate required fields in request JSON."""
-    def decorator(f):
+    def decorator(f: T) -> T:
         @wraps(f)
-        def decorated_function(*args, **kwargs):
+        def decorated_function(*args: Any, **kwargs: Any) -> Response:
             if not request.is_json:
-                return jsonify({"success": False, "error": "Content-Type must be application/json"}), 400
+                return cast(Response, (jsonify({"success": False, "error": "Content-Type must be application/json"}), 400))
             
             data = request.get_json()
             if not data:
-                return jsonify({"success": False, "error": "Request body must be valid JSON"}), 400
+                return cast(Response, (jsonify({"success": False, "error": "Request body must be valid JSON"}), 400))
             
             missing_fields = [field for field in required_fields if field not in data]
             if missing_fields:
-                return jsonify({
+                return cast(Response, (jsonify({
                     "success": False, 
                     "error": f"Missing required fields: {', '.join(missing_fields)}"
-                }), 400
+                }), 400))
             
-            return f(*args, **kwargs)
-        return decorated_function
+            return cast(Response, f(*args, **kwargs))
+        return cast(T, decorated_function)
     return decorator
 
 
@@ -190,7 +191,7 @@ def find_files_by_pattern(directory_path: str, pattern: str) -> List[Dict[str, A
     return matching_files
 
 
-def secure_file_serve(file_path: str, base_directory: str, download_name: Optional[str] = None):
+def secure_file_serve(file_path: str, base_directory: str, download_name: Optional[str] = None) -> Response:
     """
     Securely serve a file, preventing directory traversal attacks.
     
@@ -275,7 +276,7 @@ def get_directory_size(directory_path: str) -> int:
     return total_size
 
 
-def format_file_size(size_bytes: int) -> str:
+def format_file_size(size_bytes: float) -> str:
     """
     Format file size in human readable format.
     
@@ -285,11 +286,12 @@ def format_file_size(size_bytes: int) -> str:
     Returns:
         str: Formatted size (e.g., "1.5 MB")
     """
+    current_size = float(size_bytes)
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size_bytes < 1024.0:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024.0
-    return f"{size_bytes:.1f} PB"
+        if current_size < 1024.0:
+            return f"{current_size:.1f} {unit}"
+        current_size /= 1024.0
+    return f"{current_size:.1f} PB"
 
 
 def sanitize_filename(filename: str) -> str:

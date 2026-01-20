@@ -133,10 +133,7 @@ function refreshDownloads() {
 function updateDownloadsList(downloads) {
     const downloadsList = document.getElementById('downloadsList');
 
-    // The API returns {success: true, data: [...]} where data is the array of downloads
-    const items = Array.isArray(downloads) ? downloads : [];
-
-    if (!items || items.length === 0) {
+    if (!Array.isArray(downloads) || downloads.length === 0) {
         downloadsList.innerHTML = `
             <div class="empty-state">
                 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -149,7 +146,7 @@ function updateDownloadsList(downloads) {
         return;
     }
 
-    const validItems = items.filter(download => download && typeof download === 'object' && download.id);
+    const validItems = downloads.filter(download => download && typeof download === 'object' && download.id);
 
     const html = validItems
         .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
@@ -269,6 +266,7 @@ function createDownloadCard(download) {
 function startRefreshing() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
+        refreshInterval = null;
     }
 
     refreshInterval = setInterval(refreshDownloads, 2000);

@@ -122,18 +122,19 @@ class DownloadServiceAdapter:
 
         # Use user-specific download directory if none provided
         if not output_dir:
-            output_dir = self._get_user_download_dir()
+            output_dir = cast(str, self._get_user_download_dir())
         
         # Start the download with the user-specific directory
-        session_id = session.get('session_id')
+        session_id = cast(Optional[str], session.get('session_id'))
         download_id = cast(str, self._service.start_download(url, output_dir, cookies_content, session_id=session_id))
         
         # Track this download in the session
         session_downloads = self._get_session_downloads()
+        status_copy = cast(Dict[str, Any], self._service._get_status_copy(download_id))
         session_downloads[download_id] = {
             'id': download_id,
             'url': url,
-            'start_time': self._service._get_status_copy(download_id).get('start_time') if self._service._get_status_copy(download_id) else None,
+            'start_time': status_copy.get('start_time') if status_copy else None,
             'session_id': session.get('session_id'),
             'output_dir': output_dir  # Track the output directory for this download
         }
