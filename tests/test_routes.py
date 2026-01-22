@@ -65,3 +65,9 @@ class TestAPIRoutes:
         assert response.status_code == 200
         assert response.json['success'] is True
         assert response.json['data']['total_downloads'] == 0
+
+    def test_download_zip_not_found(self, client):
+        """Test downloading zip for non-existent download."""
+        response = client.get('/api/download-zip/nonexistent')
+        assert response.status_code == 404
+        assert response.json['success'] is False

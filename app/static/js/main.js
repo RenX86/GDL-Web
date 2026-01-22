@@ -1,111 +1,105 @@
 let refreshInterval;
+let statusFilter = 'all'; // Default filter
 
-// Show notification to user
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.textContent = message;
+// --- Bootstrap Components ---
+// Helper to show Bootstrap Toasts
+function showToast(title, message, type = 'info') {
+    const toastEl = document.getElementById('liveToast');
+    const toastTitle = document.getElementById('toastTitle');
+    const toastMessage = document.getElementById('toastMessage');
+    const toastIcon = document.getElementById('toastIcon');
 
-    // Add to page
-    document.body.appendChild(notification);
+    toastTitle.textContent = title;
+    toastMessage.textContent = message;
 
-    // Auto-remove after 3 seconds
-    setTimeout(() => {
-        notification.classList.add('fade-out');
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 300);
-    }, 3000);
+    // Reset classes
+    toastIcon.className = 'bi me-2';
+    
+    if (type === 'success') {
+        toastIcon.classList.add('bi-check-circle-fill', 'text-success');
+    } else if (type === 'error') {
+        toastIcon.classList.add('bi-exclamation-octagon-fill', 'text-danger');
+    } else if (type === 'warning') {
+        toastIcon.classList.add('bi-exclamation-triangle-fill', 'text-warning');
+    } else {
+        toastIcon.classList.add('bi-info-circle-fill', 'text-primary');
+    }
+
+    const toast = bootstrap.Toast.getOrCreateInstance(toastEl);
+    toast.show();
 }
 
-// Start a download
+// --- API Interactions ---
+
 function startDownload() {
-    const url = document.getElementById('mediaUrl').value.trim();
-    const cookieFile = document.getElementById('cookieFile').files[0];
-
-    if (!url) {
-        alert('Please enter a valid URL');
-        return;
-    }
-
-    // Basic URL validation
-    try {
-        new URL(url);
-    } catch (error) {
-        alert('Please enter a valid URL format');
-        return;
-    }
-
-    const downloadBtn = document.querySelector('.download-btn');
+    const urlInput = document.getElementById('mediaUrl');
+    const cookieInput = document.getElementById('cookieFile');
+    const startBtn = document.getElementById('startBtn');
     const spinner = document.getElementById('loadingSpinner');
+    const btnText = startBtn.querySelector('.btn-text');
 
-    // Disable button and show spinner
-    downloadBtn.disabled = true;
-    spinner.style.display = 'inline-block';
+    const url = urlInput.value.trim();
+    
+    if (!url) {
+        showToast('Input Error', 'Please enter a valid URL', 'warning');
+        return;
+    }
+
+    // UI Loading State
+    startBtn.disabled = true;
+    spinner.classList.remove('d-none');
+    btnText.textContent = 'Starting...';
 
     const sendRequest = (cookiesContent) => {
         fetch('/api/download', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: url, cookies: cookiesContent })
         })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                urlInput.value = '';
+                cookieInput.value = '';
+                showToast('Success', 'Download started successfully', 'success');
+                refreshDownloads();
+                // Ensure we are on the 'all' or 'active' filter to see it
+                if (statusFilter === 'completed' || statusFilter === 'error') {
+                   document.getElementById('filterAll').click();
                 }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    document.getElementById('mediaUrl').value = '';
-                    document.getElementById('cookieFile').value = '';
-                    startRefreshing();
-                    // Show success message
-                    showNotification('Download started successfully!', 'success');
-                } else {
-                    const errorMessage = data.error || data.message || 'Unknown error occurred';
-                    alert('Download failed: ' + errorMessage);
-                }
-            })
-            .catch(error => {
-                console.error('Request failed:', error);
-                if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
-                    alert('Network connection failed. Please check your connection and try again.');
-                } else {
-                    alert('Download failed: ' + error.message);
-                }
-            })
-            .finally(() => {
-                downloadBtn.disabled = false;
-                spinner.style.display = 'none';
-            });
+            } else {
+                showToast('Error', data.message || 'Failed to start download', 'error');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            showToast('Network Error', 'Could not connect to server', 'error');
+        })
+        .finally(() => {
+            startBtn.disabled = false;
+            spinner.classList.add('d-none');
+            btnText.innerHTML = '<i class="bi bi-download me-2"></i>Start Download';
+        });
     };
 
-    if (cookieFile) {
+    // Handle File Reading
+    if (cookieInput.files.length > 0) {
         const reader = new FileReader();
-        reader.onload = (e) => {
-            sendRequest(e.target.result);
+        reader.onload = (e) => sendRequest(e.target.result);
+        reader.onerror = () => {
+            showToast('File Error', 'Failed to read cookie file', 'error');
+            startBtn.disabled = false;
+            spinner.classList.add('d-none');
+            btnText.innerHTML = '<i class="bi bi-download me-2"></i>Start Download';
         };
-        reader.onerror = (error) => {
-            console.error('File reading error:', error);
-            alert('Failed to read cookie file');
-            downloadBtn.disabled = false;
-            spinner.style.display = 'none';
-        };
-        reader.readAsText(cookieFile);
+        reader.readAsText(cookieInput.files[0]);
     } else {
         sendRequest(null);
     }
 }
 
-// Refresh download status
 function refreshDownloads() {
-    // Set session flag if not already set (but don't clear history)
+    // Ensure session is marked active
     if (!sessionStorage.getItem('downloadSessionActive')) {
         sessionStorage.setItem('downloadSessionActive', 'true');
     }
@@ -114,479 +108,274 @@ function refreshDownloads() {
         .then(response => response.json())
         .then(data => {
             if (data.success && Array.isArray(data.data)) {
-                updateDownloadsList(data.data);
-            } else {
-                console.warn('Invalid response format:', data);
-                updateDownloadsList([]);
+                renderDownloads(data.data);
             }
         })
-        .catch(error => {
-            console.error('Error fetching downloads:', error);
-            const downloadsContainer = document.getElementById('downloads-container');
-            if (downloadsContainer) {
-                downloadsContainer.innerHTML = '<div class="error-message">Failed to load downloads. Please refresh the page.</div>';
+        .catch(console.error);
+}
+
+function deleteDownload(downloadId) {
+    if (!confirm('Are you sure you want to delete this download?')) return;
+
+    fetch(`/api/downloads/${downloadId}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast('Deleted', 'Download removed', 'success');
+                refreshDownloads();
+            } else {
+                showToast('Error', data.message, 'error');
+            }
+        })
+        .catch(() => showToast('Error', 'Network error during deletion', 'error'));
+}
+
+function clearSession() {
+    if (!confirm('Clear all history and files? This cannot be undone.')) return;
+
+    fetch('/api/session/clear', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast('Session Cleared', 'All history removed', 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast('Error', 'Failed to clear session', 'error');
             }
         });
 }
 
-// Update the downloads list
-function updateDownloadsList(downloads) {
-    const downloadsList = document.getElementById('downloadsList');
+function showFiles(downloadId) {
+    const listContainer = document.getElementById('filesListContainer');
+    listContainer.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div></div>';
+    
+    const modal = new bootstrap.Modal(document.getElementById('filesModal'));
+    modal.show();
 
-    if (!Array.isArray(downloads) || downloads.length === 0) {
-        downloadsList.innerHTML = `
+    fetch(`/api/files/${downloadId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.files) {
+                if (data.files.length === 0) {
+                    listContainer.innerHTML = '<div class="p-4 text-center text-muted">No files found.</div>';
+                    return;
+                }
+                
+                // Header with Zip Download Button
+                const headerHtml = `
+                    <div class="d-flex justify-content-between align-items-center p-3 border-bottom bg-body-secondary">
+                        <span class="text-muted small">${data.files.length} files found</span>
+                        <a href="/api/download-zip/${downloadId}" class="btn btn-primary btn-sm">
+                            <i class="bi bi-file-earmark-zip me-1"></i> Download All (Zip)
+                        </a>
+                    </div>
+                `;
+
+                const filesHtml = data.files.map(file => `
+                    <div class="list-group-item d-flex justify-content-between align-items-center file-item-action">
+                        <div class="text-truncate me-3">
+                            <i class="bi bi-file-earmark me-2 text-secondary"></i>
+                            <span class="fw-medium">${file.name}</span>
+                            <div class="small text-muted">${file.size || 'Unknown size'}</div>
+                        </div>
+                        <a href="/api/download-file/${downloadId}/${file.name}" class="btn btn-sm btn-outline-primary" download>
+                            <i class="bi bi-download"></i>
+                        </a>
+                    </div>
+                `).join('');
+                
+                listContainer.innerHTML = headerHtml + filesHtml;
+            } else {
+                listContainer.innerHTML = '<div class="alert alert-warning m-3">Could not load files.</div>';
+            }
+        })
+        .catch(() => {
+            listContainer.innerHTML = '<div class="alert alert-danger m-3">Network error loading files.</div>';
+        });
+}
+
+// --- Rendering & Logic ---
+
+function renderDownloads(downloads) {
+    const list = document.getElementById('downloadsList');
+    
+    // Sort: Newest first
+    const sorted = downloads.sort((a, b) => new Date(b.start_time || 0) - new Date(a.start_time || 0));
+
+    if (sorted.length === 0) {
+        list.innerHTML = `
             <div class="empty-state">
-                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <p>No downloads yet. Enter a URL above to get started!</p>
+                <i class="bi bi-inbox"></i>
+                <p>No downloads yet.</p>
             </div>`;
         return;
     }
 
-    const validItems = downloads.filter(download => download && typeof download === 'object' && download.id);
+    // Filter logic
+    const filtered = sorted.filter(d => {
+        const s = normalizeStatus(d.status);
+        if (statusFilter === 'all') return true;
+        if (statusFilter === 'in-progress') return ['starting', 'downloading', 'processing', 'retrying'].includes(s);
+        if (statusFilter === 'completed') return s === 'completed';
+        if (statusFilter === 'error') return ['error', 'cancelled'].includes(s);
+        return true;
+    });
 
-    const html = validItems
-        .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
-        // Use the real download.id from backend instead of array index
-        .map((download) => createDownloadCard(download))
-        .join('');
-
-    downloadsList.innerHTML = html;
-
-    // Add event listeners to filter buttons
-    setupFilterButtons();
-}
-
-// Delete a download
-function deleteDownload(downloadId) {
-    if (!downloadId) {
-        console.error('Invalid download ID');
+    if (filtered.length === 0) {
+        list.innerHTML = `
+            <div class="text-center py-5 text-muted">
+                <p>No downloads match the current filter.</p>
+            </div>`;
         return;
     }
 
-    if (confirm('Are you sure you want to delete this download?')) {
-        fetch(`/api/downloads/${downloadId}`, { method: 'DELETE' })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    refreshDownloads();
-                } else {
-                    alert('Failed to delete download: ' + (data.message || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error deleting download:', error);
-                alert('Network error occurred while deleting download');
-            });
-    }
+    list.innerHTML = filtered.map(d => createCardHtml(d)).join('');
 }
 
-// Create a download card
-function createDownloadCard(download) {
-    // Validate required fields
-    if (!download || !download.id) {
-        console.error('Invalid download data:', download);
-        return '<div></div>'; // Return empty HTML string
-    }
+function normalizeStatus(status) {
+    status = (status || 'pending').toLowerCase();
+    if (['completed', 'finished'].includes(status)) return 'completed';
+    if (['error', 'failed'].includes(status)) return 'error';
+    if (['cancelled', 'canceled'].includes(status)) return 'cancelled';
+    if (['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(status)) return 'downloading';
+    return 'pending';
+}
 
-    // Normalize status to expected values
-    const status = download.status || 'pending';
-    // Normalize status for UI display
-    const normalizedStatus = (() => {
-        if (['completed', 'finished'].includes(status)) return 'completed';
-        if (['error', 'failed'].includes(status)) return 'error';
-        if (['cancelled', 'canceled'].includes(status)) return 'cancelled';
-        if (['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(status)) return 'in-progress';
-        return 'in-progress'; // default for any unknown status
-    })();
-
-    const statusClass = normalizedStatus === 'completed' ? 'status-completed' :
-        normalizedStatus === 'error' ? 'status-error' :
-            normalizedStatus === 'cancelled' ? 'status-cancelled' : 'status-in-progress';
-
-    // Safely get values with defaults
-    const progress = Math.max(0, Math.min(100, parseInt(download.progress) || 0));
-    const message = download.message || download.error || '';
-    const url = download.url || 'Unknown URL';
-    const filesDownloaded = download.files_downloaded || 0;
-    const totalFiles = download.total_files || 0;
-
-    // Format dates safely
-    let startTime = 'N/A';
-    let endTime = null;
-
-    try {
-        if (download.start_time) {
-            startTime = new Date(download.start_time).toLocaleString();
-        }
-        if (download.end_time) {
-            endTime = new Date(download.end_time).toLocaleString();
-        }
-    } catch (dateError) {
-        console.warn('Invalid date format in download:', download);
-    }
-
-    // Return HTML string instead of DOM element
-    return `
-        <div class="download-card" data-download-id="${download.id}" data-status="${normalizedStatus}">
-            <div class="download-header">
-                <h3 title="${url}">${url.length > 50 ? url.substring(0, 50) + '...' : url}</h3>
-                <span class="status-badge ${statusClass}">${status}</span>
-            </div>
-            <div class="download-info">
-                <p><strong>Started:</strong> ${startTime}</p>
-                ${endTime ? `<p><strong>Completed:</strong> ${endTime}</p>` : ''}
-                <p><strong>Progress:</strong> ${progress}%</p>
-                ${totalFiles > 0 ? `<p><strong>Files:</strong> ${filesDownloaded}/${totalFiles}</p>` : ''}
-                ${message ? `<p><strong>Message:</strong> ${message}</p>` : ''}
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: ${progress}%"></div>
-            </div>
-            <div class="download-actions">
-                ${normalizedStatus === 'completed' ? `<button class="btn download-btn" onclick="showDownloadFiles('${download.id}')">View Files</button>` : ''}
-                <button class="btn download-btn" onclick="deleteDownload('${download.id}')" 
-                        ${['downloading', 'starting', 'processing', 'in_progress', 'retrying'].includes(normalizedStatus) ? 'disabled title="Cannot delete while downloading"' : ''}>
-                    Delete
+function createCardHtml(d) {
+    const status = normalizeStatus(d.status);
+    const progress = Math.round(d.progress || 0);
+    const id = d.id;
+    
+    let statusBadge, borderClass, actionBtns;
+    
+    switch(status) {
+        case 'completed':
+            statusBadge = '<span class="badge bg-success-subtle text-success border border-success-subtle">Completed</span>';
+            borderClass = 'status-completed';
+            actionBtns = `
+                <button onclick="showFiles('${id}')" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-folder2-open me-1"></i> Files
                 </button>
+                <button onclick="deleteDownload('${id}')" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-trash"></i>
+                </button>
+            `;
+            break;
+        case 'error':
+            statusBadge = '<span class="badge bg-danger-subtle text-danger border border-danger-subtle">Failed</span>';
+            borderClass = 'status-error';
+            actionBtns = `
+                <button onclick="deleteDownload('${id}')" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            `;
+            break;
+        case 'downloading':
+            statusBadge = '<span class="badge bg-primary-subtle text-primary border border-primary-subtle"><span class="spinner-grow spinner-grow-sm me-1" style="width: 0.5rem; height: 0.5rem;"></span> In Progress</span>';
+            borderClass = 'status-in-progress';
+            actionBtns = `
+                <button disabled class="btn btn-sm btn-light text-muted">
+                    <i class="bi bi-hourglass-split"></i> Processing...
+                </button>
+            `;
+            break;
+        default: // cancelled or pending
+            statusBadge = '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Cancelled</span>';
+            borderClass = 'status-cancelled';
+            actionBtns = `
+                <button onclick="deleteDownload('${id}')" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-trash"></i>
+                </button>
+            `;
+    }
+
+    const message = d.message || d.error || '';
+    const fileCount = d.total_files ? `${d.files_downloaded}/${d.total_files} files` : '';
+
+    return `
+        <div class="card shadow-sm download-item ${borderClass}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h6 class="card-subtitle text-truncate text-body-secondary" style="max-width: 70%;" title="${d.url}">
+                        <i class="bi bi-link-45deg me-1"></i>${d.url}
+                    </h6>
+                    ${statusBadge}
+                </div>
+                
+                <div class="d-flex justify-content-between align-items-center mb-1 small">
+                    <span class="fw-bold fs-5 text-dark">${progress}%</span>
+                    <span class="text-muted">${fileCount}</span>
+                </div>
+                
+                <div class="progress mb-3" style="height: 6px;">
+                    <div class="progress-bar ${status === 'completed' ? 'bg-success' : (status === 'error' ? 'bg-danger' : '')}" 
+                         role="progressbar" 
+                         style="width: ${progress}%" 
+                         aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
+                    </div>
+                </div>
+                
+                ${message ? `<div class="alert alert-light border py-1 px-2 small mb-3 text-muted text-truncate"><i class="bi bi-terminal me-1"></i>${message}</div>` : ''}
+
+                <div class="d-flex justify-content-end gap-2">
+                    ${actionBtns}
+                </div>
             </div>
         </div>
     `;
 }
 
-// Start refreshing downloads
-function startRefreshing() {
-    if (refreshInterval) {
-        clearInterval(refreshInterval);
-        refreshInterval = null;
-    }
+// --- Initialization ---
 
-    refreshInterval = setInterval(refreshDownloads, 2000);
-    refreshDownloads(); // Refresh immediately
-}
+document.addEventListener('DOMContentLoaded', () => {
+    // Theme Logic
+    const themeToggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
+    const icon = themeToggle.querySelector('i');
 
-// Clear the entire session
-function clearSession() {
-    console.log('Clear session button clicked');
-
-    // TEMPORARY: Bypassing confirm dialog for testing - REMOVE THIS LATER
-    // const userConfirmed = confirm('Are you sure you want to clear your entire session? This will remove all download history and reset the application.');
-    // console.log('Confirm dialog result:', userConfirmed);
-
-    // if (!userConfirmed) {
-    //     console.log('Clear session cancelled by user');
-    //     return;
-    // }
-
-    console.log('⚠️ WARNING: Confirm dialog bypassed for testing');
-    console.log('Proceeding with clear session...');
-    console.log('Making fetch request to /api/session/clear');
-
-    fetch('/api/session/clear', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-        .then(response => {
-            console.log('Received response:', response);
-            console.log('Response status:', response.status);
-            console.log('Response ok:', response.ok);
-            return response.json();
-        })
-        .then(data => {
-            console.log('Response data:', data);
-            if (data.success) {
-                console.log('Session cleared successfully, showing notification');
-                showNotification('Session cleared successfully!', 'success');
-                console.log('Scheduling page reload in 1 second');
-                setTimeout(() => {
-                    console.log('Reloading page now');
-                    location.reload();
-                }, 1000);
-            } else {
-                console.error('Clear session failed:', data);
-                alert('Failed to clear session: ' + (data.message || 'Unknown error'));
-            }
-        })
-        .catch(error => {
-            console.error('Error clearing session:', error);
-            alert('Network error occurred while clearing session');
-        });
-}
-
-// Add filter functionality
-function setupFilterButtons() {
-    const filterButtons = document.querySelectorAll('.filter-btn');
-
-    filterButtons.forEach(button => {
-        // Prevent adding duplicate listeners across refreshes
-        if (button.dataset.listenerAttached === 'true') return;
-
-        button.addEventListener('click', function () {
-            // Remove active class from all buttons
-            filterButtons.forEach(btn => btn.classList.remove('active'));
-            // Add active class to clicked button
-            this.classList.add('active');
-
-            const filter = this.getAttribute('data-filter');
-            filterDownloads(filter);
-        });
-
-        button.dataset.listenerAttached = 'true';
-    });
-}
-
-// Filter downloads based on status
-function filterDownloads(filter) {
-    const downloadCards = document.querySelectorAll('.download-card');
-
-    downloadCards.forEach(card => {
-        const cardStatus = card.getAttribute('data-status');
-
-        // Map backend statuses to UI filter categories
-        let category;
-        if (['completed', 'finished'].includes(cardStatus)) {
-            category = 'completed';
-        } else if (['error', 'failed'].includes(cardStatus)) {
-            category = 'error';
-        } else if (['cancelled', 'canceled'].includes(cardStatus)) {
-            category = 'error'; // cancelled downloads are shown in error filter
-        } else if (['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(cardStatus)) {
-            category = 'in-progress';
+    const setTheme = (theme) => {
+        html.setAttribute('data-bs-theme', theme);
+        localStorage.setItem('theme', theme);
+        
+        // Update Icon
+        if (theme === 'dark') {
+            icon.classList.replace('bi-moon-stars', 'bi-sun');
+            icon.classList.add('text-warning');
         } else {
-            category = 'all';
+            icon.classList.replace('bi-sun', 'bi-moon-stars');
+            icon.classList.remove('text-warning');
         }
+    };
 
-        // Determine if the card should be shown based on the selected filter
-        let showCard;
-        switch (filter) {
-            case 'all':
-                showCard = true;
-                break;
-            case 'in-progress':
-                showCard = ['starting', 'downloading', 'processing', 'in_progress', 'retrying'].includes(cardStatus);
-                break;
-            case 'completed':
-                showCard = ['completed', 'finished'].includes(cardStatus);
-                break;
-            case 'error':
-                showCard = ['error', 'failed', 'cancelled', 'canceled'].includes(cardStatus);
-                break;
-            default:
-                showCard = true;
-        }
+    // Load saved theme
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    setTheme(savedTheme);
 
-        card.style.display = showCard ? 'block' : 'none';
+    // Toggle event
+    themeToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        const current = html.getAttribute('data-bs-theme');
+        setTheme(current === 'dark' ? 'light' : 'dark');
     });
-}
 
-// Show files for a completed download
-function showDownloadFiles(downloadId) {
-    if (!downloadId) {
-        console.error('Invalid download ID');
-        return;
-    }
-
-    fetch(`/api/files/${downloadId}`)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    // Attach listeners
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                statusFilter = e.target.dataset.filter;
+                refreshDownloads();
             }
-            return response.json();
-        })
-        .then(data => {
-            if (data.success && data.files) {
-                displayDownloadFiles(downloadId, data.files);
-            } else {
-                alert('Failed to load files: ' + (data.message || 'Unknown error'));
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching files:', error);
-            alert('Failed to load files: ' + error.message);
         });
-}
-
-// Display download files in a modal or popup
-function displayDownloadFiles(downloadId, files) {
-    // Create modal overlay
-    const modal = document.createElement('div');
-    modal.className = 'file-modal-overlay';
-    modal.innerHTML = `
-        <div class="file-modal">
-            <div class="file-modal-header">
-                <h3>Downloaded Files</h3>
-                <button class="close-btn" onclick="this.closest('.file-modal-overlay').remove()">&times;</button>
-            </div>
-            <div class="file-modal-content">
-                ${files.length === 0 ?
-            '<p class="no-files">No files found for this download.</p>' :
-            `<div class="file-list">
-                        ${files.map(file => `
-                            <div class="file-item">
-                                <div class="file-info">
-                                    <span class="file-name">${file.name}</span>
-                                    <span class="file-size">${file.size}</span>
-                                </div>
-                                <button class="btn download-btn" 
-                                        onclick="downloadFile('${downloadId}', '${file.name}')">
-                                    Download
-                                </button>
-                            </div>
-                        `).join('')}
-                    </div>`
-        }
-            </div>
-        </div>
-    `;
-
-    // Add modal styles if not already present
-    if (!document.getElementById('modal-styles')) {
-        const style = document.createElement('style');
-        style.id = 'modal-styles';
-        style.textContent = `
-            .file-modal-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 1000;
-            }
-            .file-modal {
-                background: white;
-                border-radius: 8px;
-                width: 90%;
-                max-width: 600px;
-                max-height: 80vh;
-                overflow: hidden;
-            }
-            .file-modal-header {
-                padding: 20px;
-                border-bottom: 1px solid #eee;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .file-modal-header h3 {
-                margin: 0;
-            }
-            .close-btn {
-                background: none;
-                border: none;
-                font-size: 24px;
-                cursor: pointer;
-                color: #666;
-            }
-            .file-modal-content {
-                padding: 20px;
-                max-height: calc(80vh - 100px);
-                overflow-y: auto;
-            }
-            .file-list {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-            }
-            .file-item {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 10px;
-                border: 1px solid #eee;
-                border-radius: 4px;
-            }
-            .file-info {
-                display: flex;
-                flex-direction: column;
-            }
-            .file-name {
-                font-weight: 500;
-                margin-bottom: 2px;
-            }
-            .file-size {
-                font-size: 12px;
-                color: #666;
-            }
-            .no-files {
-                text-align: center;
-                color: #666;
-                margin: 20px 0;
-            }
-            .file-modal .download-btn {
-                padding: 5px 10px;
-                font-size: 12px;
-                width: auto;
-                height: auto;
-                min-width: 80px;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    document.body.appendChild(modal);
-}
-
-// Download a specific file
-function downloadFile(downloadId, filename) {
-    if (!downloadId || !filename) {
-        console.error('Invalid download ID or filename');
-        return;
-    }
-
-    // Create a download link and trigger it
-    const downloadUrl = `/api/download-file/${downloadId}/${filename}`;
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = filename; // This will suggest the filename to the browser
-    link.style.display = 'none';
-
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    showNotification(`Downloading ${filename}...`, 'info');
-}
-
-// Allow Enter key to start download
-document.addEventListener('DOMContentLoaded', function () {
-    document.getElementById('mediaUrl').addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            startDownload();
-        }
     });
 
-    // Setup filter buttons on initial load
-    setupFilterButtons();
-
-    // Set "All" filter as active by default
-    const allFilterBtn = document.querySelector('.filter-btn[data-filter="all"]');
-    if (allFilterBtn) {
-        allFilterBtn.classList.add('active');
-    }
-
-    // Attach event listener to clear session button
-    const clearBtn = document.querySelector('.clear-btn');
-    if (clearBtn) {
-        console.log('Clear session button found, attaching listener');
-        clearBtn.addEventListener('click', clearSession);
-    } else {
-        console.error('Clear session button NOT found');
-    }
+    document.getElementById('clearSessionBtn').addEventListener('click', clearSession);
 
     // Initial load
-    refreshDownloads();
+    startRefreshing();
 });
+
+function startRefreshing() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(refreshDownloads, 2000); // 2s polling
+    refreshDownloads();
+}

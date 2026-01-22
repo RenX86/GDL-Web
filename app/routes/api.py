@@ -10,6 +10,8 @@ from ..utils import handle_api_errors, validate_required_fields, secure_file_ser
 from ..models.config import AppConfig
 from ..exceptions import ResourceNotFoundError, ValidationError
 import os
+import io
+import zipfile
 
 # Create blueprint for API routes
 api_bp = Blueprint("api", __name__)
@@ -312,3 +314,56 @@ def download_file(download_id: str, filename: str) -> Response:
     
     # Serve the file securely
     return secure_file_serve(file_path, actual_output_dir, filename)
+
+
+@api_bp.route("/download-zip/<download_id>", methods=["GET"])
+@handle_api_errors
+def download_zip(download_id: str) -> Response:
+    """Download all files for a specific download ID as a single ZIP file (in-memory)"""
+    download_service = cast(Any, current_app).service_registry.get("download_service")
+
+    if not download_service.download_exists(download_id):
+        raise ResourceNotFoundError(f"Download with ID {download_id} not found")
+
+    if not download_service.is_download_in_session(download_id):
+        raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
+
+    status = download_service.get_download_status(download_id)
+    if not isinstance(status, dict):
+        raise ResourceNotFoundError("Invalid status format")
+
+    if status.get("status", "").lower() not in ["completed", "finished"]:
+        raise ValidationError("Download must be completed before zipping.")
+
+    # Locate the directory
+    # Note: Using the output_dir from status, similar to list_download_files
+    output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
+    
+    if not os.path.exists(output_dir) or not os.path.isdir(output_dir):
+        raise ResourceNotFoundError("Download directory not found on server.")
+
+    # Create in-memory zip
+    memory_file = io.BytesIO()
+    
+    has_files = False
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(output_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                # Calculate arcname (relative path inside zip)
+                arcname = os.path.relpath(file_path, output_dir)
+                zf.write(file_path, arcname)
+                has_files = True
+
+    if not has_files:
+        raise ResourceNotFoundError("No files found to zip.")
+
+    # Rewind buffer
+    memory_file.seek(0)
+
+    return send_file(
+        memory_file,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f"gallery_{download_id}.zip"
+    )
