@@ -393,7 +393,13 @@ class DownloadService:
                     self.logger.error(f"Failed to create temp config file: {e}")
                     # Fallback to no config if writing fails, or maybe just log it
                 
-                cmd.extend(['--sleep', '2-4'])
+                # Increase sleep time to avoid rate limits
+                cmd.extend(['--sleep', '4-8'])
+                
+                # Explicitly set User-Agent to mimic a real browser to avoid "Terms Violation"
+                # This matches a standard Chrome on Windows UA
+                cmd.extend(['--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'])
+                
                 cmd.extend(['-D', output_dir])
                 cmd.append('--verbose')
 
@@ -855,8 +861,27 @@ class DownloadService:
         if session_id:
             to_remove = [did for did, st in self._list_status_copy().items()
                          if st.get("session_id") == session_id]
+            
+            # Track directories to potentially clean up
+            directories_to_clean = set()
             for did in to_remove:
+                st = self._get_status_copy(did)
+                if st and st.get("output_dir"):
+                    directories_to_clean.add(st["output_dir"])
                 self.delete_download(did)
+            
+            # Clean up empty user directories
+            for directory in directories_to_clean:
+                try:
+                    if os.path.exists(directory) and os.path.isdir(directory):
+                        # Safety check: only remove directories matching user pattern
+                        dirname = os.path.basename(directory)
+                        if dirname.startswith("user_"):
+                            # Force remove the entire directory and its contents
+                            shutil.rmtree(directory)
+                            self.logger.info(f"Force removed session directory: {directory}")
+                except OSError as e:
+                    self.logger.warning(f"Failed to remove session directory {directory}: {e}")
         else:
             # Terminate all active processes
             process_list = list(self.active_processes.items())

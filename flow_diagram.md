@@ -3,6 +3,7 @@
 ## 🚀 Application Entry Point & Initialization
 
 ### 1. Application Startup (`run.py`)
+
 ```
 main() function execution:
 ├── check_dependencies() → Validates gallery-dl installation
@@ -13,6 +14,7 @@ main() function execution:
 ```
 
 **Function Calls:**
+
 - `run.py::main()`
 - `run.py::check_dependencies()`
 - `app/config.py::get_config()`
@@ -20,6 +22,7 @@ main() function execution:
 - `app/__init__.py::create_app()`
 
 ### 2. Flask App Creation (`app/__init__.py`)
+
 ```
 create_app(config_name) execution:
 ├── Flask(__name__) → Creates Flask instance
@@ -36,6 +39,7 @@ create_app(config_name) execution:
 ```
 
 **Function Calls:**
+
 - `app/__init__.py::create_app()`
 - `app/config.py::get_config()`
 - `app/services/__init__.py::create_download_service()`
@@ -46,6 +50,7 @@ create_app(config_name) execution:
 ## 🌐 Frontend User Interface Flow
 
 ### 3. HTML Template Loading (`app/templates/index.html`)
+
 ```
 Page Load Sequence:
 ├── HTML DOM Construction
@@ -55,6 +60,7 @@ Page Load Sequence:
 ```
 
 ### 4. JavaScript Initialization (`app/static/js/main.js`)
+
 ```
 DOMContentLoaded Event Handler:
 ├── document.getElementById('mediaUrl').addEventListener('keypress', function(e))
@@ -64,11 +70,13 @@ DOMContentLoaded Event Handler:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::DOMContentLoaded event handler`
 - `app/static/js/main.js::setupFilterButtons()`
 - `app/static/js/main.js::refreshDownloads()`
 
 ### 5. User Download Initiation (`app/static/js/main.js`)
+
 ```
 startDownload() function execution:
 ├── document.getElementById('mediaUrl').value.trim() → Gets URL input
@@ -81,10 +89,12 @@ startDownload() function execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::startDownload()`
 - `app/static/js/main.js::sendRequest()`
 
 ### 6. AJAX Request to API (`app/static/js/main.js`)
+
 ```
 sendRequest(cookiesContent) execution:
 ├── fetch('/api/download', {method: 'POST', ...}) → POST request to API
@@ -97,6 +107,7 @@ sendRequest(cookiesContent) execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::sendRequest()`
 - `app/static/js/main.js::startRefreshing()`
 - `app/static/js/main.js::showNotification()`
@@ -104,6 +115,7 @@ sendRequest(cookiesContent) execution:
 ## 🔌 API Layer Processing
 
 ### 7. API Route Handler (`app/routes/api.py`)
+
 ```
 start_download() route execution:
 ├── @handle_api_errors decorator → Error handling wrapper
@@ -117,6 +129,7 @@ start_download() route execution:
 ```
 
 **Function Calls:**
+
 - `app/routes/api.py::start_download()`
 - `app/utils.py::handle_api_errors()`
 - `app/utils.py::validate_required_fields()`
@@ -126,6 +139,7 @@ start_download() route execution:
 ## ⚙️ Service Layer Processing
 
 ### 8. Download Service Adapter (`app/services/download_service_adapter.py`)
+
 ```
 start_download() adapter execution:
 ├── self._service.start_download(url, output_dir, cookies_content) → Delegates to raw service
@@ -133,10 +147,12 @@ start_download() adapter execution:
 ```
 
 **Function Calls:**
+
 - `app/services/download_service_adapter.py::start_download()`
 - `app/services/download_service.py::start_download()`
 
 ### 9. Core Download Service (`app/services/download_service.py`)
+
 ```
 start_download() service execution:
 ├── download_id = str(int(time.time() * 1000)) → Generates unique ID
@@ -150,6 +166,7 @@ start_download() service execution:
 ```
 
 **Function Calls:**
+
 - `app/services/download_service.py::start_download()`
 - `app/services/download_service.py::_download_worker()` (threaded)
 - `app/services/cookie_manager.py::encrypt_cookies()`
@@ -157,6 +174,7 @@ start_download() service execution:
 ## 🔄 Background Download Processing
 
 ### 10. Download Worker Thread (`app/services/download_service.py`)
+
 ```
 _download_worker() execution:
 ├── check_network_connectivity() → Validates internet connection
@@ -190,6 +208,7 @@ _download_worker() execution:
 ```
 
 **Function Calls:**
+
 - `app/services/download_service.py::_download_worker()`
 - `app/services/network_utils.py::check_network_connectivity()`
 - `app/services/network_utils.py::check_url_accessibility()`
@@ -199,6 +218,7 @@ _download_worker() execution:
 - `app/services/download_service.py::_is_retriable_error()`
 
 ### 11. Progress Parsing (`app/services/progress_parser.py`)
+
 ```
 parse_progress() execution:
 ├── Line analysis for progress indicators
@@ -213,10 +233,12 @@ count_downloaded_files() execution:
 ```
 
 **Function Calls:**
+
 - `app/services/progress_parser.py::parse_progress()`
 - `app/services/progress_parser.py::count_downloaded_files()`
 
 ### 12. Cookie Management (`app/services/cookie_manager.py`)
+
 ```
 encrypt_cookies() execution:
 ├── Fernet(encryption_key.encode()) → Creates cipher
@@ -230,12 +252,14 @@ decrypt_cookies() execution:
 ```
 
 **Function Calls:**
+
 - `app/services/cookie_manager.py::encrypt_cookies()`
 - `app/services/cookie_manager.py::decrypt_cookies()`
 
 ## 📊 Real-time Status Updates
 
 ### 13. Frontend Status Polling (`app/static/js/main.js`)
+
 ```
 startRefreshing() execution:
 ├── clearInterval(refreshInterval) → Clears existing interval
@@ -250,11 +274,13 @@ refreshDownloads() execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::startRefreshing()`
 - `app/static/js/main.js::refreshDownloads()`
 - `app/static/js/main.js::updateDownloadsList()`
 
 ### 14. Downloads List API (`app/routes/api.py`)
+
 ```
 list_all_downloads() route execution:
 ├── @handle_api_errors decorator → Error handling
@@ -267,11 +293,13 @@ list_all_downloads() route execution:
 ```
 
 **Function Calls:**
+
 - `app/routes/api.py::list_all_downloads()`
 - `app/services/download_service_adapter.py::list_all_downloads()`
 - `app/services/download_service.py::get_all_downloads()`
 
 ### 15. UI Update Processing (`app/static/js/main.js`)
+
 ```
 updateDownloadsList() execution:
 ├── Array.isArray(downloads) check → Validates data
@@ -292,6 +320,7 @@ createDownloadCard() execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::updateDownloadsList()`
 - `app/static/js/main.js::createDownloadCard()`
 - `app/static/js/main.js::setupFilterButtons()`
@@ -299,6 +328,7 @@ createDownloadCard() execution:
 ## 🗑️ Download Management Operations
 
 ### 16. Delete Download Flow (`app/static/js/main.js` → `app/routes/api.py`)
+
 ```
 deleteDownload() frontend execution:
 ├── confirm('Are you sure...') → User confirmation
@@ -323,12 +353,14 @@ delete_download() service execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::deleteDownload()`
 - `app/routes/api.py::delete_download()`
 - `app/services/download_service_adapter.py::delete_download()`
 - `app/services/download_service.py::delete_download()`
 
 ### 17. Clear History Flow (`app/static/js/main.js` → `app/routes/api.py`)
+
 ```
 clearHistory() frontend execution:
 ├── confirm('Are you sure...') → User confirmation
@@ -353,6 +385,7 @@ clear_history() service execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::clearHistory()`
 - `app/routes/api.py::clear_download_history()`
 - `app/services/download_service_adapter.py::clear_history()`
@@ -361,6 +394,7 @@ clear_history() service execution:
 ## 🔍 Filter and Search Operations
 
 ### 18. Download Filtering (`app/static/js/main.js`)
+
 ```
 setupFilterButtons() execution:
 ├── document.querySelectorAll('.filter-btn') → Gets filter buttons
@@ -382,12 +416,14 @@ filterDownloads() execution:
 ```
 
 **Function Calls:**
+
 - `app/static/js/main.js::setupFilterButtons()`
 - `app/static/js/main.js::filterDownloads()`
 
 ## 📈 Statistics and Monitoring
 
 ### 19. Statistics API (`app/routes/api.py`)
+
 ```
 get_statistics() route execution:
 ├── @handle_api_errors decorator → Error handling
@@ -406,6 +442,7 @@ get_statistics() service execution:
 ```
 
 **Function Calls:**
+
 - `app/routes/api.py::get_statistics()`
 - `app/services/download_service_adapter.py::get_statistics()`
 - `app/services/download_service.py::get_statistics()`
@@ -413,6 +450,7 @@ get_statistics() service execution:
 ## 🔧 Configuration and Utilities
 
 ### 20. Configuration Management (`app/config.py`)
+
 ```
 get_config() execution:
 ├── config_name parameter processing → Determines environment
@@ -424,6 +462,7 @@ get_config() execution:
 ```
 
 ### 21. Error Handling (`app/utils.py`)
+
 ```
 handle_api_errors() decorator execution:
 ├── try-except wrapper around route function
@@ -444,12 +483,14 @@ validate_required_fields() decorator execution:
 ```
 
 **Function Calls:**
+
 - `app/utils.py::handle_api_errors()`
 - `app/utils.py::validate_required_fields()`
 
 ## 🌐 Network Utilities (`app/services/network_utils.py`)
 
 ### 22. Network Connectivity Checks
+
 ```
 check_network_connectivity() execution:
 ├── socket.create_connection(('8.8.8.8', 53), timeout=3) → Tests DNS connectivity
@@ -468,13 +509,15 @@ is_network_error() execution:
 ```
 
 **Function Calls:**
+
 - `app/services/network_utils.py::check_network_connectivity()`
 - `app/services/network_utils.py::check_url_accessibility()`
 - `app/services/network_utils.py::is_network_error()`
 
 ## 📝 Complete Function Call Chain Summary
 
-### Download Initiation Chain:
+### Download Initiation Chain
+
 1. `app/static/js/main.js::startDownload()`
 2. `app/static/js/main.js::sendRequest()`
 3. `app/routes/api.py::start_download()`
@@ -486,7 +529,8 @@ is_network_error() execution:
 9. `app/services/network_utils.py::check_network_connectivity()`
 10. `subprocess.Popen()` → gallery-dl execution
 
-### Status Update Chain:
+### Status Update Chain
+
 1. `app/static/js/main.js::refreshDownloads()` (every 2 seconds)
 2. `app/routes/api.py::list_all_downloads()`
 3. `app/services/download_service_adapter.py::list_all_downloads()`
@@ -494,7 +538,8 @@ is_network_error() execution:
 5. `app/static/js/main.js::updateDownloadsList()`
 6. `app/static/js/main.js::createDownloadCard()`
 
-### File Structure Impact:
+### File Structure Impact
+
 - **Entry Point**: `run.py::main()`
 - **App Factory**: `app/__init__.py::create_app()`
 - **Web Routes**: `app/routes/web.py::index()`
