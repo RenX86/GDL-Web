@@ -312,8 +312,11 @@ def download_file(download_id: str, filename: str) -> Response:
     print(f"DEBUG: filename={filename}")
     print(f"DEBUG: actual_output_dir={actual_output_dir}")
     
+    # Check if this is a preview request
+    preview = request.args.get('preview', 'false').lower() == 'true'
+    
     # Serve the file securely
-    return secure_file_serve(file_path, actual_output_dir, filename)
+    return secure_file_serve(file_path, actual_output_dir, filename, as_attachment=not preview)
 
 
 @api_bp.route("/download-zip/<download_id>", methods=["GET"])

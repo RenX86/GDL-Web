@@ -191,7 +191,7 @@ def find_files_by_pattern(directory_path: str, pattern: str) -> List[Dict[str, A
     return matching_files
 
 
-def secure_file_serve(file_path: str, base_directory: str, download_name: Optional[str] = None) -> Response:
+def secure_file_serve(file_path: str, base_directory: str, download_name: Optional[str] = None, as_attachment: bool = True) -> Response:
     """
     Securely serve a file, preventing directory traversal attacks.
     
@@ -199,6 +199,7 @@ def secure_file_serve(file_path: str, base_directory: str, download_name: Option
         file_path: The requested file path
         base_directory: The base directory that files should be served from
         download_name: Optional filename for download
+        as_attachment: Whether to serve as attachment (download) or inline (preview)
         
     Returns:
         Flask response object for file download
@@ -238,13 +239,14 @@ def secure_file_serve(file_path: str, base_directory: str, download_name: Option
         response = send_file(
             file_real,
             mimetype=mime_type,
-            as_attachment=True,
+            as_attachment=as_attachment,
             download_name=filename,
-            conditional=False  # Disable conditional responses to force download
+            conditional=True  # Enable conditional responses for caching/previews
         )
         
-        # Add explicit headers to ensure browser downloads the file
-        response.headers["Content-Disposition"] = f"attachment; filename=\"{filename}\""
+        # Add explicit headers to ensure browser handles the file correctly
+        disposition = "attachment" if as_attachment else "inline"
+        response.headers["Content-Disposition"] = f"{disposition}; filename=\"{filename}\""
         response.headers["X-Content-Type-Options"] = "nosniff"
         
         return response

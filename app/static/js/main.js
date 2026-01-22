@@ -163,28 +163,52 @@ function showFiles(downloadId) {
                 
                 // Header with Zip Download Button
                 const headerHtml = `
-                    <div class="d-flex justify-content-between align-items-center p-3 border-bottom bg-body-secondary">
-                        <span class="text-muted small">${data.files.length} files found</span>
+                    <div class="d-flex justify-content-between align-items-center p-3 border-bottom bg-body-secondary sticky-top" style="z-index: 10;">
+                        <span class="text-muted small fw-medium">${data.files.length} files found</span>
                         <a href="/api/download-zip/${downloadId}" class="btn btn-primary btn-sm">
                             <i class="bi bi-file-earmark-zip me-1"></i> Download All (Zip)
                         </a>
                     </div>
                 `;
 
-                const filesHtml = data.files.map(file => `
-                    <div class="list-group-item d-flex justify-content-between align-items-center file-item-action">
-                        <div class="text-truncate me-3">
-                            <i class="bi bi-file-earmark me-2 text-secondary"></i>
-                            <span class="fw-medium">${file.name}</span>
-                            <div class="small text-muted">${file.size || 'Unknown size'}</div>
-                        </div>
-                        <a href="/api/download-file/${downloadId}/${file.name}" class="btn btn-sm btn-outline-primary" download>
-                            <i class="bi bi-download"></i>
-                        </a>
+                // Helper to check if file is image
+                const isImage = (filename) => /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(filename);
+
+                const gridHtml = `
+                    <div class="file-grid">
+                        ${data.files.map(file => {
+                            const isImg = isImage(file.name);
+                            const downloadUrl = `/api/download-file/${downloadId}/${file.name}`;
+                            const previewUrl = `${downloadUrl}?preview=true`;
+                            
+                            return `
+                                <div class="file-card" title="${file.name}">
+                                    <div class="file-thumbnail-container">
+                                        ${isImg 
+                                            ? `<img src="${previewUrl}" class="file-thumbnail" loading="lazy" alt="${file.name}">` 
+                                            : `<i class="bi bi-file-earmark-text file-icon-placeholder"></i>`
+                                        }
+                                    </div>
+                                    <div class="file-card-body border-top">
+                                        <div class="text-truncate fw-medium">${file.name}</div>
+                                        <div class="d-flex justify-content-between align-items-center mt-1">
+                                            <span class="text-muted small" style="font-size: 0.7rem;">${file.size || ''}</span>
+                                            <a href="${downloadUrl}" class="btn btn-sm btn-light py-0 px-1" download>
+                                                <i class="bi bi-download"></i>
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <a href="${isImg ? previewUrl : '#'}" target="_blank" class="stretched-link" ${!isImg ? 'onclick="return false;"' : ''}></a>
+                                    <div class="file-card-actions">
+                                        <!-- Actions could go here -->
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
-                `).join('');
+                `;
                 
-                listContainer.innerHTML = headerHtml + filesHtml;
+                listContainer.innerHTML = headerHtml + gridHtml;
             } else {
                 listContainer.innerHTML = '<div class="alert alert-warning m-3">Could not load files.</div>';
             }
