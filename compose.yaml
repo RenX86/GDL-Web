@@ -1,0 +1,24 @@
+services:
+  server:
+    build:
+      context: .
+    ports:
+      - 5000:5000
+    volumes:
+      # Use named volumes instead of local folders
+      - gdl_downloads:/app/downloads
+      - gdl_cookies:/app/secure_cookies
+    environment:
+      - FLASK_ENV=${FLASK_ENV}
+      - PORT=5000
+      - DOWNLOADS_DIR=/app/downloads
+      - COOKIES_DIR=/app/secure_cookies
+      # Secrets are loaded from .env file
+      - COOKIES_ENCRYPTION_KEY=${COOKIES_ENCRYPTION_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+    restart: always
+
+# Define the persistent storage volumes
+volumes:
+  gdl_downloads:
+  gdl_cookies:
