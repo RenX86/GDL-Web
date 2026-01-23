@@ -43,7 +43,7 @@ class Config:
             )
 
     # Logging Configuration
-    LOG_LEVEL = os.environ.get("LOG_LEVEL","DEBUG")
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG")
     LOG_FILE = os.environ.get("LOG_FILE", "app.log")
 
     # Gallery-dl Configuration
@@ -52,7 +52,7 @@ class Config:
             "filename": "{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}",
             "write-info-json": True,
             "videos": True,  # Explicitly enable video downloads
-            "animation": True, # Enable animated files (gifs, etc)
+            "animation": True,  # Enable animated files (gifs, etc)
         },
         "instagram": {
             "filename": "PostBy_{username}_{post_shortcode}_{num}.{extension}",
@@ -62,9 +62,7 @@ class Config:
             "videos": True,
             "retweets": False,
         },
-        "wallhaven": {  # explicit if you want
-            "filename": "wallhaven_{id}.{extension}"
-        }
+        "wallhaven": {"filename": "wallhaven_{id}.{extension}"},  # explicit if you want
     }
 
     # Default values for subclasses

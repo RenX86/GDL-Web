@@ -5,8 +5,17 @@ This module contains all API routes for the application.
 """
 
 from flask import Blueprint, request, jsonify, current_app, Response, send_file, session
-from typing import cast, Any
-from ..utils import handle_api_errors, validate_required_fields, secure_file_serve, list_directory_contents, get_file_info, format_file_size, is_safe_path, sanitize_filename
+from typing import cast, Any, Generator
+from ..utils import (
+    handle_api_errors,
+    validate_required_fields,
+    secure_file_serve,
+    list_directory_contents,
+    get_file_info,
+    format_file_size,
+    is_safe_path,
+    sanitize_filename,
+)
 from ..models.config import AppConfig
 from ..exceptions import ResourceNotFoundError, ValidationError
 import os
@@ -23,8 +32,8 @@ api_bp = Blueprint("api", __name__)
 def stream_events() -> Response:
     """Server-Sent Events endpoint for real-time updates"""
     download_service = cast(Any, current_app).service_registry.get("download_service")
-    
-    def stream():
+
+    def stream() -> Generator[str, None, None]:
         q = download_service.subscribe()
         try:
             while True:
@@ -46,7 +55,7 @@ def stream_events() -> Response:
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",  # Disable buffering for Nginx/proxies
-        }
+        },
     )
 
 
@@ -67,9 +76,7 @@ def start_download() -> Response:
         raise ValueError("Invalid URL format")
 
     # Start download using config from Flask app
-    download_id = download_service.start_download(
-        url, cookies_content=cookies_content
-    )
+    download_id = download_service.start_download(url, cookies_content=cookies_content)
 
     return jsonify(
         {
@@ -228,7 +235,7 @@ def get_app_config() -> Response:
         debug_mode=cast(bool, current_app.config.get("DEBUG", False)),
     )
 
-    return cast(Response, jsonify({"success": True, "data": app_config.to_dict()}))
+    return jsonify({"success": True, "data": app_config.to_dict()})
 
 
 @api_bp.route("/files/<download_id>", methods=["GET"])
@@ -239,10 +246,12 @@ def list_download_files(download_id: str) -> Response:
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
-    
+
     # Check if this download belongs to the current session
     if not download_service.is_download_in_session(download_id):
-        raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
+        raise ResourceNotFoundError(
+            f"Download with ID {download_id} not found in your session"
+        )
 
     # Get download status
     status = download_service.get_download_status(download_id)
@@ -251,9 +260,9 @@ def list_download_files(download_id: str) -> Response:
 
     # Use the explicit file list if available to prevent session overlap
     specific_files = status.get("downloaded_files_list", [])
-    
+
     files_to_format = []
-    
+
     if specific_files:
         # Use the specific files recorded during the download
         for file_path in specific_files:
@@ -261,7 +270,9 @@ def list_download_files(download_id: str) -> Response:
                 if os.path.exists(file_path):
                     files_to_format.append(get_file_info(file_path))
             except Exception as e:
-                current_app.logger.warning(f"Could not get info for specific file {file_path}: {e}")
+                current_app.logger.warning(
+                    f"Could not get info for specific file {file_path}: {e}"
+                )
     else:
         # Fallback: List files in the output directory (Legacy/Failed cases)
         output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
@@ -271,22 +282,30 @@ def list_download_files(download_id: str) -> Response:
     # Format file information for frontend
     formatted_files = []
     for file_info in files_to_format:
-        formatted_files.append({
-            "name": file_info["name"],
-            "size": format_file_size(file_info["size"]),
-            "size_bytes": file_info["size"],
-            "type": file_info["mime_type"],
-            "extension": file_info["extension"],
-            "modified": file_info["modified"],
-            "download_url": f"/api/download-file/{download_id}/{file_info['name']}" if file_info["is_file"] else None
-        })
+        formatted_files.append(
+            {
+                "name": file_info["name"],
+                "size": format_file_size(file_info["size"]),
+                "size_bytes": file_info["size"],
+                "type": file_info["mime_type"],
+                "extension": file_info["extension"],
+                "modified": file_info["modified"],
+                "download_url": (
+                    f"/api/download-file/{download_id}/{file_info['name']}"
+                    if file_info["is_file"]
+                    else None
+                ),
+            }
+        )
 
-    return jsonify({
-        "success": True,
-        "download_id": download_id,
-        "files": formatted_files,
-        "total_files": len(formatted_files)
-    })
+    return jsonify(
+        {
+            "success": True,
+            "download_id": download_id,
+            "files": formatted_files,
+            "total_files": len(formatted_files),
+        }
+    )
 
 
 @api_bp.route("/download-file/<download_id>/<path:filename>", methods=["GET"])
@@ -300,10 +319,12 @@ def download_file(download_id: str, filename: str) -> Response:
 
     if not download_service.download_exists(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
-    
+
     # Check if this download belongs to the current session
     if not download_service.is_download_in_session(download_id):
-        raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
+        raise ResourceNotFoundError(
+            f"Download with ID {download_id} not found in your session"
+        )
 
     # Get download status
     status = download_service.get_download_status(download_id)
@@ -313,21 +334,23 @@ def download_file(download_id: str, filename: str) -> Response:
     # Check if download is completed
     download_status = status.get("status", "").lower()
     if download_status not in ["completed", "finished"]:
-        raise ValidationError(f"Download must be completed before files can be accessed. Current status: {download_status}")
+        raise ValidationError(
+            f"Download must be completed before files can be accessed. Current status: {download_status}"
+        )
 
     # Get the absolute path to downloads directory
     downloads_dir = os.path.abspath(current_app.config["DOWNLOADS_DIR"])
-    
+
     # Use the actual output directory from the download status (already retrieved earlier)
     actual_output_dir = status.get("output_dir", downloads_dir)
     actual_output_dir = os.path.abspath(actual_output_dir)
-    
+
     # Look for the file in the actual output directory
     file_path = None
     potential_path = os.path.join(actual_output_dir, filename)
     if os.path.exists(potential_path) and os.path.isfile(potential_path):
         file_path = potential_path
-    
+
     # If not found in the actual output directory, search recursively in the downloads directory
     # This handles potential edge cases where file locations may vary
     if not file_path and os.path.exists(downloads_dir):
@@ -338,25 +361,29 @@ def download_file(download_id: str, filename: str) -> Response:
                 if os.path.isfile(potential_path):
                     file_path = potential_path
                     break
-    
+
     if not file_path:
-        raise ResourceNotFoundError(f"File '{filename}' not found for download {download_id}")
+        raise ResourceNotFoundError(
+            f"File '{filename}' not found for download {download_id}"
+        )
 
     # 2. Re-validate after join – defence in depth
     if not is_safe_path(actual_output_dir, file_path):
         raise ValidationError("Access denied: file path outside allowed directory")
-    
+
     # Debug: Print the paths being used
     print(f"DEBUG: file_path={file_path}")
     print(f"DEBUG: downloads_dir={downloads_dir}")
     print(f"DEBUG: filename={filename}")
     print(f"DEBUG: actual_output_dir={actual_output_dir}")
-    
+
     # Check if this is a preview request
-    preview = request.args.get('preview', 'false').lower() == 'true'
-    
+    preview = request.args.get("preview", "false").lower() == "true"
+
     # Serve the file securely
-    return secure_file_serve(file_path, actual_output_dir, filename, as_attachment=not preview)
+    return secure_file_serve(
+        file_path, actual_output_dir, filename, as_attachment=not preview
+    )
 
 
 @api_bp.route("/download-zip/<download_id>", methods=["GET"])
@@ -369,7 +396,9 @@ def download_zip(download_id: str) -> Response:
         raise ResourceNotFoundError(f"Download with ID {download_id} not found")
 
     if not download_service.is_download_in_session(download_id):
-        raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
+        raise ResourceNotFoundError(
+            f"Download with ID {download_id} not found in your session"
+        )
 
     status = download_service.get_download_status(download_id)
     if not isinstance(status, dict):
@@ -381,15 +410,15 @@ def download_zip(download_id: str) -> Response:
     # Locate the directory
     # Note: Using the output_dir from status, similar to list_download_files
     output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
-    
+
     if not os.path.exists(output_dir) or not os.path.isdir(output_dir):
         raise ResourceNotFoundError("Download directory not found on server.")
 
     # Create in-memory zip
     memory_file = io.BytesIO()
-    
+
     has_files = False
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _, files in os.walk(output_dir):
             for file in files:
                 file_path = os.path.join(root, file)
@@ -406,7 +435,7 @@ def download_zip(download_id: str) -> Response:
 
     return send_file(
         memory_file,
-        mimetype='application/zip',
+        mimetype="application/zip",
         as_attachment=True,
-        download_name=f"gallery_{download_id}.zip"
+        download_name=f"gallery_{download_id}.zip",
     )

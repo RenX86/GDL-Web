@@ -15,7 +15,7 @@ import shutil
 import json
 from threading import RLock
 from datetime import datetime
-from typing import Optional, Dict, List, Any, List
+from typing import Optional, Dict, List, Any
 from queue import Queue, Empty
 from contextlib import contextmanager
 from .network_utils import (
@@ -24,7 +24,10 @@ from .network_utils import (
     is_network_error,
 )
 from .cookie_manager import encrypt_cookies, decrypt_cookies
-from .progress_parser import parse_progress, count_downloaded_files, extract_downloaded_files
+from .progress_parser import (
+    parse_progress,
+    extract_downloaded_files,
+)
 
 
 class DownloadService:
@@ -66,22 +69,22 @@ class DownloadService:
 
         # Initialize encryption key
         self.encryption_key = config.get("COOKIES_ENCRYPTION_KEY")
-        
+
         # Start janitor thread for cleanup
         self._start_janitor_thread()
-        
+
         # Event listeners for SSE
         self._listeners: List[Queue] = []
 
     def subscribe(self) -> Queue:
         """Subscribe to status updates"""
-        q = Queue()
+        q: Queue[Dict[str, Any]] = Queue()
         with self._lock:
             self._listeners.append(q)
             # Send initial state immediately
             initial_state = {
                 "type": "initial",
-                "data": list(self.download_status.values())
+                "data": list(self.download_status.values()),
             }
             q.put(initial_state)
         return q
@@ -104,7 +107,7 @@ class DownloadService:
                     # Queue full or closed, ignore
                     pass
 
-    def _set_status(self, download_id: str, **kwargs) -> None:
+    def _set_status(self, download_id: str, **kwargs: Any) -> None:
         """Atomic update (insert or merge)"""
         with self._lock:
             if download_id not in self.download_status:
@@ -117,23 +120,29 @@ class DownloadService:
         """Return a *deep* copy so caller cannot mutate the shared dict"""
         with self._lock:
             import copy
+
             return copy.deepcopy(self.download_status.get(download_id))
-        
+
     def _pop_status(self, download_id: str) -> Optional[Dict[str, Any]]:
         """Atomic delete"""
         with self._lock:
             return self.download_status.pop(download_id, None)
-    
+
     @contextmanager
-    def _managed_subprocess(self, process: subprocess.Popen, threads: List[threading.Thread], download_id: str) -> Any:
+    def _managed_subprocess(
+        self,
+        process: subprocess.Popen,
+        threads: List[threading.Thread],
+        download_id: str,
+    ) -> Any:
         """
         Context manager for subprocess lifecycle management.
-        
+
         Args:
             process: The subprocess.Popen instance
             threads: List of threads to manage
             download_id: Download ID for logging
-            
+
         Yields:
             The process instance for use within the context
         """
@@ -144,17 +153,22 @@ class DownloadService:
             self.logger.debug(f"Exiting subprocess context for {download_id}")
             self._cleanup_subprocess_resources(process, threads, download_id)
 
-    def _cleanup_subprocess_resources(self, process: Optional[subprocess.Popen], threads: List[threading.Thread], download_id: str) -> None:
+    def _cleanup_subprocess_resources(
+        self,
+        process: Optional[subprocess.Popen],
+        threads: List[threading.Thread],
+        download_id: str,
+    ) -> None:
         """
         Clean up subprocess resources including pipes and threads.
-        
+
         Args:
             process: The subprocess.Popen instance
             threads: List of threads to join
             download_id: Download ID for logging
         """
         self.logger.debug(f"Cleaning up subprocess resources for {download_id}")
-        
+
         # Close pipes first to prevent blocking
         if process and process.stdout:
             try:
@@ -162,14 +176,14 @@ class DownloadService:
                 self.logger.debug(f"Closed stdout pipe for {download_id}")
             except Exception as e:
                 self.logger.warning(f"Error closing stdout pipe for {download_id}: {e}")
-        
+
         if process and process.stderr:
             try:
                 process.stderr.close()
                 self.logger.debug(f"Closed stderr pipe for {download_id}")
             except Exception as e:
                 self.logger.warning(f"Error closing stderr pipe for {download_id}: {e}")
-        
+
         # Join threads with timeout and proper error handling
         for i, thread in enumerate(threads):
             if thread and thread.is_alive():
@@ -177,12 +191,18 @@ class DownloadService:
                     self.logger.debug(f"Joining thread {thread.name} for {download_id}")
                     thread.join(timeout=2.0)
                     if thread.is_alive():
-                        self.logger.warning(f"Thread {thread.name} for {download_id} did not terminate within timeout")
+                        self.logger.warning(
+                            f"Thread {thread.name} for {download_id} did not terminate within timeout"
+                        )
                     else:
-                        self.logger.debug(f"Successfully joined thread {thread.name} for {download_id}")
+                        self.logger.debug(
+                            f"Successfully joined thread {thread.name} for {download_id}"
+                        )
                 except Exception as e:
-                    self.logger.warning(f"Error joining thread {thread.name} for {download_id}: {e}")
-        
+                    self.logger.warning(
+                        f"Error joining thread {thread.name} for {download_id}: {e}"
+                    )
+
         # Terminate process if still running
         if process and process.poll() is None:
             try:
@@ -193,27 +213,32 @@ class DownloadService:
                     process.kill()
                     self.logger.debug(f"Killed process for {download_id}")
             except Exception as e:
-                self.logger.warning(f"Error terminating/killing process for {download_id}: {e}")
+                self.logger.warning(
+                    f"Error terminating/killing process for {download_id}: {e}"
+                )
 
     def _is_process_active(self, download_id: str) -> bool:
         """Thread-safe check if a process is currently active"""
         with self._process_lock:
-            return download_id in self.active_processes and self.active_processes[download_id] is not None
-    
+            return (
+                download_id in self.active_processes
+                and self.active_processes[download_id] is not None
+            )
+
     def _start_janitor_thread(self) -> None:
         """Start the background janitor thread for cleanup"""
-        MAX_AGE = 4 * 60   # seconds (4 minutes)
-        
-        def _janitor():
+        MAX_AGE = 4 * 60  # seconds (4 minutes)
+
+        def _janitor() -> None:
             while True:
                 try:
                     # Run cleanup logic immediately, then sleep
                     cutoff = datetime.now().timestamp() - MAX_AGE
-                    
+
                     # Create a copy of keys to avoid issues during iteration
                     with self._lock:
                         download_ids = list(self.download_status.keys())
-                    
+
                     for did in download_ids:
                         try:
                             st = self._get_status_copy(did)
@@ -221,31 +246,38 @@ class DownloadService:
                                 try:
                                     end_time = datetime.fromisoformat(st["end_time"])
                                     if end_time.timestamp() < cutoff:
-                                        self.logger.info(f"Janitor: removing expired download {did}")
+                                        self.logger.info(
+                                            f"Janitor: removing expired download {did}"
+                                        )
                                         self.delete_download(did)
                                 except ValueError:
                                     # Handle invalid date format
-                                    self.logger.warning(f"Invalid date format for download {did}, removing anyway")
+                                    self.logger.warning(
+                                        f"Invalid date format for download {did}, removing anyway"
+                                    )
                                     self.delete_download(did)
                         except Exception as e:
-                            self.logger.error(f"Error processing download {did} in janitor: {e}")
-                    
+                            self.logger.error(
+                                f"Error processing download {did} in janitor: {e}"
+                            )
+
                     # Check every minute
                     time.sleep(60)
-                            
+
                 except Exception as e:
                     self.logger.error(f"Error in janitor thread: {e}")
-                    time.sleep(60) # Prevent tight loop on error
-                    
+                    time.sleep(60)  # Prevent tight loop on error
+
         janitor_thread = threading.Thread(target=_janitor, daemon=True, name="janitor")
         janitor_thread.start()
-        
+
     def _list_status_copy(self) -> Dict[str, Dict[str, Any]]:
         """Deep copy of the entire dict (for get_all_downloads)"""
         with self._lock:
             import copy
+
             return copy.deepcopy(self.download_status)
-   
+
     def is_valid_url(self, url: str) -> bool:
         """
         Validate if the provided URL is valid.
@@ -327,16 +359,18 @@ class DownloadService:
             # Add timeout to prevent hanging on readline
             start_time = time.time()
             max_runtime = 3600  # 1 hour maximum runtime for thread
-            
+
             for line in iter(stream.readline, ""):
                 if line:  # Only put non-empty lines
-                    queue.put(line.rstrip('\n\r'))
-                    
+                    queue.put(line.rstrip("\n\r"))
+
                 # Check for thread timeout
                 if time.time() - start_time > max_runtime:
-                    self.logger.warning(f"Thread reading from stream exceeded maximum runtime of {max_runtime} seconds")
+                    self.logger.warning(
+                        f"Thread reading from stream exceeded maximum runtime of {max_runtime} seconds"
+                    )
                     break
-                    
+
         except Exception as e:
             self.logger.error(f"Error reading stream: {str(e)}")
         finally:
@@ -406,16 +440,18 @@ class DownloadService:
                     )
 
                 # ======  BUILD COMMAND  ======
-                cmd = ['gallery-dl']
-                
+                cmd = ["gallery-dl"]
+
                 # Create a temporary config file for this download
-                gallery_dl_config = self.config.get('GALLERY_DL_CONFIG', {})
-                temp_config_path = os.path.join(self.cookies_dir, f"config_{download_id}.json")
-                
+                gallery_dl_config = self.config.get("GALLERY_DL_CONFIG", {})
+                temp_config_path = os.path.join(
+                    self.cookies_dir, f"config_{download_id}.json"
+                )
+
                 # Structure the config correctly for gallery-dl
                 # Specific extractors like 'instagram' should be nested under 'extractor'
                 final_config: Dict[str, Any] = {"extractor": {}}
-                
+
                 if isinstance(gallery_dl_config, dict):
                     for key, value in gallery_dl_config.items():
                         if key == "extractor" and isinstance(value, dict):
@@ -424,24 +460,29 @@ class DownloadService:
                         else:
                             # Move top-level extractor keys (like 'instagram') into 'extractor'
                             final_config["extractor"][key] = value
-                
+
                 try:
-                    with open(temp_config_path, 'w') as f:
+                    with open(temp_config_path, "w") as f:
                         json.dump(final_config, f, indent=2)
-                    cmd.extend(['--config', temp_config_path])
+                    cmd.extend(["--config", temp_config_path])
                 except Exception as e:
                     self.logger.error(f"Failed to create temp config file: {e}")
                     # Fallback to no config if writing fails, or maybe just log it
-                
+
                 # Increase sleep time to avoid rate limits
-                cmd.extend(['--sleep', '4-8'])
-                
+                cmd.extend(["--sleep", "4-8"])
+
                 # Explicitly set User-Agent to mimic a real browser to avoid "Terms Violation"
                 # This matches a standard Chrome on Windows UA
-                cmd.extend(['--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'])
-                
-                cmd.extend(['-D', output_dir])
-                cmd.append('--verbose')
+                cmd.extend(
+                    [
+                        "--user-agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    ]
+                )
+
+                cmd.extend(["-D", output_dir])
+                cmd.append("--verbose")
 
                 # ======  COOKIE HANDLING  ======
                 temp_cookie_path = None
@@ -488,12 +529,14 @@ class DownloadService:
                 q_stderr: Queue[str] = Queue()
 
                 t_stdout = threading.Thread(
-                    target=self._enqueue_output, args=(process.stdout, q_stdout),
-                    name=f"stdout_reader_{download_id}"
+                    target=self._enqueue_output,
+                    args=(process.stdout, q_stdout),
+                    name=f"stdout_reader_{download_id}",
                 )
                 t_stderr = threading.Thread(
-                    target=self._enqueue_output, args=(process.stderr, q_stderr),
-                    name=f"stderr_reader_{download_id}"
+                    target=self._enqueue_output,
+                    args=(process.stderr, q_stderr),
+                    name=f"stderr_reader_{download_id}",
                 )
                 t_stdout.daemon = True
                 t_stderr.daemon = True
@@ -501,7 +544,9 @@ class DownloadService:
                 t_stderr.start()
 
                 # Use context manager to ensure proper cleanup
-                with self._managed_subprocess(process, [t_stdout, t_stderr], download_id):
+                with self._managed_subprocess(
+                    process, [t_stdout, t_stderr], download_id
+                ):
                     stdout_lines = []
                     stderr_lines = []
                     network_error_detected = False
@@ -511,39 +556,59 @@ class DownloadService:
                     # Check process status with lock to avoid race conditions
                     with self._process_lock:
                         process_alive = process.poll() is None
-                    
+
                     # Add timeout mechanism for hanging processes
                     start_time = time.time()
                     max_runtime = 3600  # 1 hour maximum runtime
                     last_output_time = start_time
-                    
-                    while process_alive or t_stdout.is_alive() or t_stderr.is_alive() or not q_stdout.empty() or not q_stderr.empty():
+
+                    while (
+                        process_alive
+                        or t_stdout.is_alive()
+                        or t_stderr.is_alive()
+                        or not q_stdout.empty()
+                        or not q_stderr.empty()
+                    ):
                         current_time = time.time()
-                        
+
                         # Check for timeout
                         if current_time - start_time > max_runtime:
-                            self.logger.error(f"Download {download_id} exceeded maximum runtime of {max_runtime} seconds")
-                            raise TimeoutError(f"Download exceeded maximum runtime of {max_runtime} seconds")
-                        
+                            self.logger.error(
+                                f"Download {download_id} exceeded maximum runtime of {max_runtime} seconds"
+                            )
+                            raise TimeoutError(
+                                f"Download exceeded maximum runtime of {max_runtime} seconds"
+                            )
+
                         # Check for stalled process (no output for 5 minutes)
                         if current_time - last_output_time > 300:  # 5 minutes
-                            self.logger.warning(f"Download {download_id} appears stalled (no output for 5 minutes)")
-                            raise TimeoutError(f"Download appears stalled (no output for 5 minutes)")
-                        
-                        output_received = False
-                        
+                            self.logger.warning(
+                                f"Download {download_id} appears stalled (no output for 5 minutes)"
+                            )
+                            raise TimeoutError(
+                                "Download appears stalled (no output for 5 minutes)"
+                            )
+
                         try:
                             line = q_stdout.get_nowait()
                             stdout_lines.append(line.strip())
                             self.logger.info(f"[gallery-dl-stdout] {line.strip()}")
-                            
+
                             files_so_far, updates = parse_progress(line, files_so_far)
                             if updates:
                                 self._set_status(download_id, **updates)
-                                
-                            if any(err in line.lower() for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]):
+
+                            if any(
+                                err in line.lower()
+                                for err in [
+                                    "connection error",
+                                    "timeout",
+                                    "network",
+                                    "connection refused",
+                                    "connection reset",
+                                ]
+                            ):
                                 network_error_detected = True
-                            output_received = True
                             last_output_time = current_time
                         except Empty:
                             pass
@@ -552,9 +617,17 @@ class DownloadService:
                             line = q_stderr.get_nowait()
                             stderr_lines.append(line.strip())
                             self.logger.info(f"[gallery-dl-stderr] {line.strip()}")
-                            if any(err in line.lower() for err in ["connection error", "timeout", "network", "connection refused", "connection reset"]):
+                            if any(
+                                err in line.lower()
+                                for err in [
+                                    "connection error",
+                                    "timeout",
+                                    "network",
+                                    "connection refused",
+                                    "connection reset",
+                                ]
+                            ):
                                 network_error_detected = True
-                            output_received = True
                             last_output_time = current_time
                         except Empty:
                             pass
@@ -570,8 +643,10 @@ class DownloadService:
                     try:
                         process.wait()
                     except Exception as e:
-                        self.logger.warning(f"Error waiting for process termination: {e}")
-                
+                        self.logger.warning(
+                            f"Error waiting for process termination: {e}"
+                        )
+
                 # Safely remove from active processes with lock (already cleaned up by context manager)
                 with self._process_lock:
                     self.active_processes.pop(download_id, None)
@@ -580,8 +655,8 @@ class DownloadService:
                 # Check process status with lock to avoid race conditions
                 with self._process_lock:
                     process_exists = process is not None
-                
-                if not process_exists:           # should never happen, but be safe
+
+                if not process_exists:  # should never happen, but be safe
                     self._set_status(
                         download_id,
                         status="failed",
@@ -595,7 +670,7 @@ class DownloadService:
                 # Check process return code with lock to avoid race conditions
                 with self._process_lock:
                     return_code = process.returncode if process else None
-                
+
                 if return_code == 0:
                     files_list = extract_downloaded_files(stdout_lines)
                     self._set_status(
@@ -609,7 +684,7 @@ class DownloadService:
                         downloaded_files_list=files_list,
                         retry_count=retry_count,
                     )
-                    
+
                     status = self._get_status_copy(download_id)
                     files_count = status.get("files_downloaded", 0) if status else 0
                     self.logger.info(
@@ -623,10 +698,12 @@ class DownloadService:
                 # Check process status with lock to avoid race conditions
                 with self._process_lock:
                     process_exists = process is not None
-                
+
                 if process_exists:
                     error_message = "\n".join(stderr_lines) or "Unknown error occurred"
-                    if network_error_detected or self._is_retriable_error(error_message):
+                    if network_error_detected or self._is_retriable_error(
+                        error_message
+                    ):
                         if retry_count < self.max_retries:
                             self.logger.warning(
                                 "Download %s failed with retriable error: %s",
@@ -661,8 +738,8 @@ class DownloadService:
                 # Check process status with lock to avoid race conditions
                 with self._process_lock:
                     process_exists = process is not None
-                
-                if not process_exists:          # gallery-dl never started
+
+                if not process_exists:  # gallery-dl never started
                     self._set_status(
                         download_id,
                         status="failed",
@@ -670,7 +747,7 @@ class DownloadService:
                         end_time=datetime.now().isoformat(),
                         error=last_error,
                     )
-                    break                                    # do NOT retry
+                    break  # do NOT retry
 
                 # otherwise consider retry
                 if retry_count < self.max_retries:
@@ -717,26 +794,38 @@ class DownloadService:
             if cookie_file_path and os.path.exists(cookie_file_path):
                 try:
                     os.remove(cookie_file_path)
-                    self.logger.info("Removed encrypted cookie file: %s", cookie_file_path)
+                    self.logger.info(
+                        "Removed encrypted cookie file: %s", cookie_file_path
+                    )
                 except OSError as e:
                     self.logger.warning(f"Failed to remove encrypted cookie file: {e}")
 
             # Remove the temporary decrypted cookie file (use the dynamically created path)
             if cookies_content and self.encryption_key:
-                temp_cookie_path = os.path.join(self.cookies_dir, f".temp_{download_id}.txt")
+                temp_cookie_path = os.path.join(
+                    self.cookies_dir, f".temp_{download_id}.txt"
+                )
                 if os.path.exists(temp_cookie_path):
                     try:
                         os.remove(temp_cookie_path)
-                        self.logger.info("Removed temporary cookie file: %s", temp_cookie_path)
+                        self.logger.info(
+                            "Removed temporary cookie file: %s", temp_cookie_path
+                        )
                     except OSError as e:
-                        self.logger.warning(f"Failed to remove temporary cookie file: {e}")
-            
+                        self.logger.warning(
+                            f"Failed to remove temporary cookie file: {e}"
+                        )
+
             # Remove temporary config file
-            temp_config_path = os.path.join(self.cookies_dir, f"config_{download_id}.json")
+            temp_config_path = os.path.join(
+                self.cookies_dir, f"config_{download_id}.json"
+            )
             if os.path.exists(temp_config_path):
                 try:
                     os.remove(temp_config_path)
-                    self.logger.info("Removed temporary config file: %s", temp_config_path)
+                    self.logger.info(
+                        "Removed temporary config file: %s", temp_config_path
+                    )
                 except OSError as e:
                     self.logger.warning(f"Failed to remove temporary config file: {e}")
         except Exception as e:
@@ -812,7 +901,9 @@ class DownloadService:
                         # Force kill if it doesn't terminate gracefully
                         process.kill()
                 except Exception as e:
-                    self.logger.error("Error terminating process %s: %s", download_id, e)
+                    self.logger.error(
+                        "Error terminating process %s: %s", download_id, e
+                    )
                 finally:
                     self.active_processes.pop(download_id, None)
                     # Set status outside process lock to avoid deadlock
@@ -857,7 +948,7 @@ class DownloadService:
             status = self.download_status[download_id]
             files = status.get("downloaded_files_list", [])
             output_dir = status.get("output_dir")
-            
+
             # 1. Delete specific files
             if files:
                 for file_path in files:
@@ -866,43 +957,53 @@ class DownloadService:
                         if os.path.exists(full_path):
                             os.remove(full_path)
                             self.logger.info(f"Deleted file: {full_path}")
-                            
+
                             # 2. Recursive empty directory cleanup
                             # Start from the file's directory and go up
                             current_dir = os.path.dirname(full_path)
-                            
+
                             # Safety: Get the root downloads directory to prevent deleting it
-                            root_downloads_dir = os.path.abspath(self.config.get("DOWNLOADS_DIR", "downloads"))
-                            
+                            root_downloads_dir = os.path.abspath(
+                                self.config.get("DOWNLOADS_DIR", "downloads")
+                            )
+
                             while True:
                                 # Stop if we reach the root downloads directory or system root
-                                if current_dir == root_downloads_dir or current_dir == os.path.dirname(current_dir):
+                                if (
+                                    current_dir == root_downloads_dir
+                                    or current_dir == os.path.dirname(current_dir)
+                                ):
                                     break
-                                
-                                # Safety: Only delete if directory belongs to a user session (starts with 'user_') 
+
+                                # Safety: Only delete if directory belongs to a user session (starts with 'user_')
                                 # OR is a subdirectory within the output_dir
                                 is_safe_to_delete = False
-                                dir_name = os.path.basename(current_dir)
-                                
+
                                 # Check if it's a user directory or inside one
-                                if "user_" in full_path or (output_dir and output_dir in current_dir):
+                                if "user_" in full_path or (
+                                    output_dir and output_dir in current_dir
+                                ):
                                     is_safe_to_delete = True
-                                
+
                                 if not is_safe_to_delete:
                                     break
 
                                 try:
                                     # rmdir only works if directory is empty
                                     os.rmdir(current_dir)
-                                    self.logger.info(f"Deleted empty directory: {current_dir}")
+                                    self.logger.info(
+                                        f"Deleted empty directory: {current_dir}"
+                                    )
                                     # Move up one level
                                     current_dir = os.path.dirname(current_dir)
                                 except OSError:
                                     # Directory not empty or other error, stop climbing
                                     break
-                                    
+
                     except Exception as e:
-                        self.logger.error(f"Error processing file/directory {file_path}: {e}")
+                        self.logger.error(
+                            f"Error processing file/directory {file_path}: {e}"
+                        )
 
             # 3. Final cleanup check for the main output directory
             # This catches cases where files list might be empty or incomplete
@@ -913,22 +1014,28 @@ class DownloadService:
                     try:
                         # Attempt to remove if empty
                         os.rmdir(output_dir)
-                        self.logger.info(f"Deleted empty session directory: {output_dir}")
+                        self.logger.info(
+                            f"Deleted empty session directory: {output_dir}"
+                        )
                     except OSError:
                         # Directory not empty, likely contains untracked files/folders
                         # FALLBACK: If we are sure this is a user session dir, force remove it
                         try:
-                            self.logger.info(f"Force removing remaining session directory: {output_dir}")
+                            self.logger.info(
+                                f"Force removing remaining session directory: {output_dir}"
+                            )
                             shutil.rmtree(output_dir)
                         except Exception as e:
-                            self.logger.error(f"Failed to force remove directory {output_dir}: {e}")
+                            self.logger.error(
+                                f"Failed to force remove directory {output_dir}: {e}"
+                            )
 
     def delete_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:
             self.active_processes.pop(download_id).terminate()
         self.delete_download_files(download_id)
         self._pop_status(download_id)
-        
+
         # Comprehensive cookie and config cleanup
         try:
             # 1. Encrypted cookie file
@@ -936,30 +1043,35 @@ class DownloadService:
             if os.path.exists(enc):
                 os.remove(enc)
                 self.logger.info(f"Deleted encrypted cookie: {enc}")
-                
+
             # 2. Temporary decrypted cookie file
             temp_cookie = os.path.join(self.cookies_dir, f".temp_{download_id}.txt")
             if os.path.exists(temp_cookie):
                 os.remove(temp_cookie)
                 self.logger.info(f"Deleted temp cookie: {temp_cookie}")
-                
+
             # 3. Temporary config file
             temp_config = os.path.join(self.cookies_dir, f"config_{download_id}.json")
             if os.path.exists(temp_config):
                 os.remove(temp_config)
                 self.logger.info(f"Deleted temp config: {temp_config}")
-                
+
         except Exception as e:
-            self.logger.error(f"Error cleaning up cookies/config for {download_id}: {e}")
-            
+            self.logger.error(
+                f"Error cleaning up cookies/config for {download_id}: {e}"
+            )
+
         self._notify_listeners("delete", {"id": download_id})
         return True
 
     def clear_history(self, session_id: Optional[str] = None) -> None:
         if session_id:
-            to_remove = [did for did, st in self._list_status_copy().items()
-                         if st.get("session_id") == session_id]
-            
+            to_remove = [
+                did
+                for did, st in self._list_status_copy().items()
+                if st.get("session_id") == session_id
+            ]
+
             # Track directories to potentially clean up
             directories_to_clean = set()
             for did in to_remove:
@@ -967,7 +1079,7 @@ class DownloadService:
                 if st and st.get("output_dir"):
                     directories_to_clean.add(st["output_dir"])
                 self.delete_download(did)
-            
+
             # Clean up empty user directories
             for directory in directories_to_clean:
                 try:
@@ -977,9 +1089,13 @@ class DownloadService:
                         if dirname.startswith("user_"):
                             # Force remove the entire directory and its contents
                             shutil.rmtree(directory)
-                            self.logger.info(f"Force removed session directory: {directory}")
+                            self.logger.info(
+                                f"Force removed session directory: {directory}"
+                            )
                 except OSError as e:
-                    self.logger.warning(f"Failed to remove session directory {directory}: {e}")
+                    self.logger.warning(
+                        f"Failed to remove session directory {directory}: {e}"
+                    )
         else:
             # Terminate all active processes
             process_list = list(self.active_processes.items())
@@ -994,19 +1110,30 @@ class DownloadService:
                 except Exception:
                     pass  # Process may have already terminated
             self.active_processes.clear()
-            
+
             # Remove all statuses
             for did in list(self._list_status_copy().keys()):
                 # Only call delete_download to ensure proper cleanup
                 self.delete_download(did)
-        
+
         self._notify_listeners("clear", {})
 
     def get_statistics(self) -> Dict[str, Any]:
         data = self._list_status_copy().values()
         total = len(data)
-        completed = sum(1 for st in data if st.get("status") in {"completed", "finished"})
+        completed = sum(
+            1 for st in data if st.get("status") in {"completed", "finished"}
+        )
         failed = sum(1 for st in data if st.get("status") in {"failed", "error"})
-        in_progress = sum(1 for st in data if st.get("status") in {"downloading", "starting", "processing", "in_progress"})
-        return {"total_downloads": total, "completed_downloads": completed,
-                "failed_downloads": failed, "in_progress_downloads": in_progress}
+        in_progress = sum(
+            1
+            for st in data
+            if st.get("status")
+            in {"downloading", "starting", "processing", "in_progress"}
+        )
+        return {
+            "total_downloads": total,
+            "completed_downloads": completed,
+            "failed_downloads": failed,
+            "in_progress_downloads": in_progress,
+        }

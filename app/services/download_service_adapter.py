@@ -27,14 +27,14 @@ class DownloadServiceAdapter:
         """
         self._service = download_service
         self.logger = logging.getLogger(__name__)
-    
+
     def _ensure_session_initialized(self) -> None:
         """Ensure session has required keys for download isolation."""
         try:
-            if 'session_id' not in session:
-                session['session_id'] = str(uuid.uuid4())
-            if 'user_downloads' not in session:
-                session['user_downloads'] = {}
+            if "session_id" not in session:
+                session["session_id"] = str(uuid.uuid4())
+            if "user_downloads" not in session:
+                session["user_downloads"] = {}
         except RuntimeError:
             # We're outside request context, can't access session
             pass
@@ -42,42 +42,51 @@ class DownloadServiceAdapter:
             self.logger.error(f"Error initializing session: {str(e)}")
             # Fall back to default directory if there's an error
             pass
-    
+
     def _get_user_download_dir(self) -> str:
         """Get the user-specific download directory."""
         try:
             self._ensure_session_initialized()
-            return session.get('user_download_dir', current_app.config.get("DOWNLOADS_DIR", "downloads"))
+            return cast(
+                str,
+                session.get(
+                    "user_download_dir",
+                    current_app.config.get("DOWNLOADS_DIR", "downloads"),
+                ),
+            )
         except RuntimeError:
             # We're outside request context, return default
-            return current_app.config.get("DOWNLOADS_DIR", "downloads")
+            return cast(str, current_app.config.get("DOWNLOADS_DIR", "downloads"))
         except Exception as e:
             self.logger.error(f"Error getting user download directory: {str(e)}")
-            return current_app.config.get("DOWNLOADS_DIR", "downloads")
-    
+            return cast(str, current_app.config.get("DOWNLOADS_DIR", "downloads"))
+
     def _get_session_downloads(self) -> Dict[str, Dict[str, Any]]:
         """Get downloads for current session."""
         try:
             self._ensure_session_initialized()
-            return session.get('user_downloads', {})
+            return cast(Dict[str, Dict[str, Any]], session.get("user_downloads", {}))
         except RuntimeError:
             # We're outside request context, return empty dict
             return {}
-    
+
     def _set_session_downloads(self, downloads: Dict[str, Dict[str, Any]]) -> None:
         """Set downloads for current session."""
         try:
             self._ensure_session_initialized()
-            session['user_downloads'] = downloads
+            session["user_downloads"] = downloads
         except RuntimeError:
             # We're outside request context, can't set session
             pass
-    
-    def _filter_downloads_by_session(self, all_downloads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+    def _filter_downloads_by_session(
+        self, all_downloads: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Filter downloads to only show those belonging to current session."""
-        session_downloads = self._get_session_downloads()
-        session_ids = set(session_downloads.keys())
-        return [download for download in all_downloads if download.get('id') in session_ids]
+        session_ids = set(self._get_session_downloads().keys())
+        return [
+            download for download in all_downloads if download.get("id") in session_ids
+        ]
 
     def is_valid_url(self, url: str) -> bool:
         """
@@ -111,35 +120,40 @@ class DownloadServiceAdapter:
         """
         # Ensure session is initialized with user-specific directory
         self._ensure_session_initialized()
-        
+
         # Create user-specific download directory if it doesn't exist
-        if 'user_download_dir' not in session:
+        if "user_download_dir" not in session:
             base_download_dir = current_app.config.get("DOWNLOADS_DIR", "downloads")
             user_dir = os.path.join(base_download_dir, f"user_{session['session_id']}")
             os.makedirs(user_dir, exist_ok=True)
-            session['user_download_dir'] = user_dir
+            session["user_download_dir"] = user_dir
             self.logger.info(f"Created user-specific download directory: {user_dir}")
 
         # Use user-specific download directory if none provided
         if not output_dir:
-            output_dir = cast(str, self._get_user_download_dir())
-        
+            output_dir = self._get_user_download_dir()
+
         # Start the download with the user-specific directory
-        session_id = cast(Optional[str], session.get('session_id'))
-        download_id = cast(str, self._service.start_download(url, output_dir, cookies_content, session_id=session_id))
-        
+        session_id = cast(Optional[str], session.get("session_id"))
+        download_id = cast(
+            str,
+            self._service.start_download(
+                url, output_dir, cookies_content, session_id=session_id
+            ),
+        )
+
         # Track this download in the session
         session_downloads = self._get_session_downloads()
         status_copy = cast(Dict[str, Any], self._service._get_status_copy(download_id))
         session_downloads[download_id] = {
-            'id': download_id,
-            'url': url,
-            'start_time': status_copy.get('start_time') if status_copy else None,
-            'session_id': session.get('session_id'),
-            'output_dir': output_dir  # Track the output directory for this download
+            "id": download_id,
+            "url": url,
+            "start_time": status_copy.get("start_time") if status_copy else None,
+            "session_id": session.get("session_id"),
+            "output_dir": output_dir,  # Track the output directory for this download
         }
         self._set_session_downloads(session_downloads)
-        
+
         return download_id
 
     def get_download_status(self, download_id: str) -> Optional[Dict[str, Any]]:
@@ -219,15 +233,18 @@ class DownloadServiceAdapter:
             list: List of downloads belonging to current session
         """
         all_downloads = cast(List[Dict[str, Any]], self._service.get_all_downloads())
-        
+
         # Strictly filter downloads by current session
-        session_downloads = self._get_session_downloads()
-        session_download_ids = set(session_downloads.keys())
-        
+        session_download_ids = set(self._get_session_downloads().keys())
+
         # Only return downloads that are explicitly tracked in the current session
-        filtered_downloads = [d for d in all_downloads if d.get('id') in session_download_ids]
-        
-        self.logger.debug(f"Filtered {len(all_downloads)} total downloads to {len(filtered_downloads)} session downloads")
+        filtered_downloads = [
+            d for d in all_downloads if d.get("id") in session_download_ids
+        ]
+
+        self.logger.debug(
+            f"Filtered {len(all_downloads)} total downloads to {len(filtered_downloads)} session downloads"
+        )
         return filtered_downloads
 
     def download_exists(self, download_id: str) -> bool:
@@ -243,7 +260,7 @@ class DownloadServiceAdapter:
         # First check if download exists in the service
         if not cast(bool, self._service.download_exists(download_id)):
             return False
-        
+
         # Then check if it belongs to current session
         session_downloads = self._get_session_downloads()
         return download_id in session_downloads
@@ -251,10 +268,10 @@ class DownloadServiceAdapter:
     def is_download_in_session(self, download_id: str) -> bool:
         """
         Check if a download belongs to the current user session.
-        
+
         Args:
             download_id (str): ID of the download to check
-            
+
         Returns:
             bool: True if the download belongs to current session, False otherwise
         """
@@ -273,7 +290,7 @@ class DownloadServiceAdapter:
         """
         if not self.download_exists(download_id):
             raise ValueError(f"Download {download_id} not found in current session")
-        
+
         self._service.cancel_download(download_id)
 
     def delete_download(self, download_id: str) -> None:
@@ -288,13 +305,13 @@ class DownloadServiceAdapter:
         """
         if not self.download_exists(download_id):
             raise ValueError(f"Download {download_id} not found in current session")
-        
+
         # Remove from session tracking
         session_downloads = self._get_session_downloads()
         if download_id in session_downloads:
             del session_downloads[download_id]
             self._set_session_downloads(session_downloads)
-        
+
         self._service.delete_download(download_id)
 
     def clear_history(self, session_id: Optional[str] = None) -> None:
@@ -303,7 +320,7 @@ class DownloadServiceAdapter:
         """
         if session_id:
             self._service.clear_history(session_id=session_id)
-        
+
         # Clear session tracking
         self._set_session_downloads({})
 
@@ -314,20 +331,30 @@ class DownloadServiceAdapter:
         Returns:
             dict: Statistics about downloads in current session
         """
-        session_downloads = self._get_session_downloads()
         session_download_list = self.list_all_downloads()
-        
+
         total_downloads = len(session_download_list)
-        completed_downloads = sum(1 for d in session_download_list if d.get('status') in ['completed', 'finished'])
-        failed_downloads = sum(1 for d in session_download_list if d.get('status') in ['failed', 'error'])
-        active_downloads = sum(1 for d in session_download_list if d.get('status') in ['downloading', 'starting', 'processing', 'in_progress'])
-        
+        completed_downloads = sum(
+            1
+            for d in session_download_list
+            if d.get("status") in ["completed", "finished"]
+        )
+        failed_downloads = sum(
+            1 for d in session_download_list if d.get("status") in ["failed", "error"]
+        )
+        active_downloads = sum(
+            1
+            for d in session_download_list
+            if d.get("status")
+            in ["downloading", "starting", "processing", "in_progress"]
+        )
+
         return {
-            'total_downloads': total_downloads,
-            'completed_downloads': completed_downloads,
-            'failed_downloads': failed_downloads,
-            'active_downloads': active_downloads,
-            'session_id': session.get('session_id')
+            "total_downloads": total_downloads,
+            "completed_downloads": completed_downloads,
+            "failed_downloads": failed_downloads,
+            "active_downloads": active_downloads,
+            "session_id": session.get("session_id"),
         }
 
     def subscribe(self) -> Any:
