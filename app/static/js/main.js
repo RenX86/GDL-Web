@@ -130,12 +130,6 @@ function deleteDownload(downloadId) {
         .catch(() => showToast('Error', 'Network error during deletion', 'error'));
 }
 
-function clearSession() {
-    // Show custom modal instead of browser confirm
-    const modal = new bootstrap.Modal(document.getElementById('clearSessionModal'));
-    modal.show();
-}
-
 // --- File Preview Logic ---
 
 function openPreview(url) {
@@ -557,12 +551,101 @@ function removeCard(id) {
 // --- Initialization ---
 
 document.addEventListener('DOMContentLoaded', () => {
-    // ... (theme logic) ...
+    // Theme Logic
+    const themeToggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
+    const icon = themeToggle.querySelector('i');
 
-    // ... (listeners) ...
+    const setTheme = (theme) => {
+        html.setAttribute('data-bs-theme', theme);
+        localStorage.setItem('theme', theme);
+        
+        // Update Icon
+        if (theme === 'dark') {
+            icon.classList.replace('bi-moon-stars', 'bi-sun');
+        } else {
+            icon.classList.replace('bi-sun', 'bi-moon-stars');
+        }
+    };
+
+    // Load saved theme
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    setTheme(savedTheme);
+
+    // Toggle event
+    themeToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        const current = html.getAttribute('data-bs-theme');
+        setTheme(current === 'dark' ? 'light' : 'dark');
+    });
+
+    // Attach Filter Listeners
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                statusFilter = e.target.dataset.filter;
+                // Force a re-render or status check if needed
+                // With SSE, we might just filter the existing view if we stored the data locally
+                // For now, let's just trigger a manual fetch to be safe
+                fetch('/api/downloads')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) renderDownloads(data.data);
+                    });
+            }
+        });
+    });
+
+    // Attach Clear Session Button Handler (Opens Modal)
+    const clearSessionBtn = document.getElementById('clearSessionBtn');
+    console.log("Clear Session Button Found:", !!clearSessionBtn);
+    
+    if (clearSessionBtn) {
+        clearSessionBtn.addEventListener('click', (e) => {
+            e.preventDefault(); // Prevent any default action
+            console.log("Clear Session Clicked");
+            try {
+                const modalElement = document.getElementById('clearSessionModal');
+                const modal = new bootstrap.Modal(modalElement);
+                modal.show();
+            } catch (err) {
+                console.error("Error opening modal:", err);
+            }
+        });
+    }
+
+    // Attach Confirm Clear Session Handler (Performs Action)
+    const confirmBtn = document.getElementById('confirmClearSessionBtn');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+            const modalEl = document.getElementById('clearSessionModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            
+            // Disable button
+            const originalText = confirmBtn.textContent;
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'CLEARING...';
+
+            fetch('/api/session/clear', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Session Cleared', 'All history removed', 'success');
+                        modal.hide();
+                    } else {
+                        showToast('Error', 'Failed to clear session', 'error');
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = originalText;
+                    }
+                })
+                .catch(() => {
+                    showToast('Error', 'Network error', 'error');
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = originalText;
+                });
+        });
+    }
 
     // Start SSE connection
     setupEventStream();
 });
-
-// Remove old startRefreshing/polling code
