@@ -27,8 +27,6 @@
     --bs-body-bg: var(--color-bg);
     --bs-body-color: var(--color-text);
     
-    /* Ensure border color stays black for the "pop" look, or white for high contrast?
-       The user liked the "Vibrant Neo-Brutalist" which usually keeps black borders. */
     --brutal-border-color: #000000; 
 }
 
@@ -42,7 +40,6 @@ body {
 }
 
 [data-bs-theme="dark"] body {
-    /* Light dots on dark bg */
     background-image: radial-gradient(rgba(255,255,255,0.2) 1px, transparent 1px);
 }
 
@@ -54,7 +51,7 @@ body {
     box-shadow: var(--brutal-shadow-offset) var(--brutal-shadow-offset) 0 var(--brutal-border-color) !important;
     border-radius: var(--brutal-radius) !important;
     background-color: var(--color-surface);
-    color: var(--color-text); /* Explicit text color */
+    color: var(--color-text);
     transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -64,15 +61,15 @@ body {
 }
 
 .card-header {
-    background-color: #FEF3C7; /* Pale Yellow */
+    background-color: #FEF3C7;
     border-bottom: var(--brutal-border-width) solid var(--brutal-border-color) !important;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #000; /* Always black text on yellow header */
+    color: #000;
 }
 [data-bs-theme="dark"] .card-header {
-    background-color: #334155; /* Dark Slate Header */
+    background-color: #334155;
     color: #fff;
 }
 
@@ -150,7 +147,7 @@ body {
 
 /* Navbar */
 .navbar {
-    background-color: #FDE047 !important; /* Vibrant Yellow */
+    background-color: #FDE047 !important;
     border-bottom: var(--brutal-border-width) solid var(--brutal-border-color) !important;
     box-shadow: 0 4px 0 var(--brutal-border-color);
     padding: 1rem 0;
@@ -158,7 +155,6 @@ body {
 [data-bs-theme="dark"] .navbar {
     background-color: #FACC15 !important;
 }
-/* Ensure navbar text is always black on yellow */
 .navbar-brand, .nav-link {
     color: #000 !important;
 }
@@ -349,4 +345,85 @@ body {
     color: #fff;
     border-color: #000; /* Keep borders black */
     background-color: #334155;
+}
+
+/* =========================================
+   MOBILE OPTIMIZATIONS (Max Width: 768px)
+   ========================================= */
+@media (max-width: 768px) {
+    /* Reduce global padding */
+    .container.pb-5 {
+        padding-bottom: 2rem !important;
+    }
+
+    /* Navbar adjustments */
+    .navbar-brand {
+        font-size: 1.4rem;
+    }
+
+    /* Card adjustments to save space */
+    .card {
+        border-width: 2px !important;
+        box-shadow: 3px 3px 0 var(--brutal-border-color) !important; /* Smaller shadow */
+        margin-bottom: 1rem;
+    }
+
+    .card-body {
+        padding: 1rem; /* Compact padding */
+    }
+
+    /* Stack Filter Buttons */
+    .btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        width: 100%;
+    }
+    .btn-group .btn {
+        flex: 1 0 45%; /* 2 columns */
+        margin-bottom: -2px; /* Overlap bottom borders */
+        margin-right: -2px; /* Overlap right borders */
+        border-radius: 0 !important;
+    }
+    /* Fix corners for 2x2 grid attempt or just let them be square-ish */
+    .btn-group .btn:first-child { border-radius: var(--brutal-radius) 0 0 0 !important; }
+    .btn-group .btn:nth-child(2) { border-radius: 0 var(--brutal-radius) 0 0 !important; }
+    .btn-group .btn:nth-last-child(2) { border-radius: 0 0 0 var(--brutal-radius) !important; }
+    .btn-group .btn:last-child { border-radius: 0 0 var(--brutal-radius) 0 !important; }
+
+
+    /* Download Item tweaks */
+    .download-item .d-flex.justify-content-between.align-items-start {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.5rem;
+    }
+    .download-item .card-subtitle {
+        max-width: 100% !important; /* Allow full width for URL */
+        margin-bottom: 0.25rem;
+    }
+    
+    /* File Grid: Ensure 2 columns */
+    .file-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+        padding: 0.5rem;
+    }
+    .file-card-body {
+        font-size: 0.75rem;
+    }
+
+    /* Buttons */
+    .btn-lg {
+        padding: 0.6rem 1rem;
+        font-size: 1rem;
+    }
+    
+    /* Toast positioning */
+    .toast-container {
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 1rem;
+        width: 90%;
+        max-width: 400px;
+    }
 }

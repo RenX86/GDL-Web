@@ -166,12 +166,12 @@ class DownloadService:
     
     def _start_janitor_thread(self) -> None:
         """Start the background janitor thread for cleanup"""
-        MAX_AGE = 24 * 60 * 60   # seconds (24 hours)
+        MAX_AGE = 4 * 60   # seconds (4 minutes)
         
         def _janitor():
             while True:
                 try:
-                    time.sleep(3600)          # run every hour
+                    # Run cleanup logic immediately, then sleep
                     cutoff = datetime.now().timestamp() - MAX_AGE
                     
                     # Create a copy of keys to avoid issues during iteration
@@ -185,6 +185,7 @@ class DownloadService:
                                 try:
                                     end_time = datetime.fromisoformat(st["end_time"])
                                     if end_time.timestamp() < cutoff:
+                                        self.logger.info(f"Janitor: removing expired download {did}")
                                         self.delete_download(did)
                                 except ValueError:
                                     # Handle invalid date format
@@ -192,10 +193,13 @@ class DownloadService:
                                     self.delete_download(did)
                         except Exception as e:
                             self.logger.error(f"Error processing download {did} in janitor: {e}")
+                    
+                    # Check every minute
+                    time.sleep(60)
                             
                 except Exception as e:
                     self.logger.error(f"Error in janitor thread: {e}")
-                    # Continue running even if there's an error
+                    time.sleep(60) # Prevent tight loop on error
                     
         janitor_thread = threading.Thread(target=_janitor, daemon=True, name="janitor")
         janitor_thread.start()
