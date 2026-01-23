@@ -848,13 +848,30 @@ class DownloadService:
             self.active_processes.pop(download_id).terminate()
         self.delete_download_files(download_id)
         self._pop_status(download_id)
-        # cookie cleanup
+        
+        # Comprehensive cookie and config cleanup
         try:
+            # 1. Encrypted cookie file
             enc = os.path.join(self.cookies_dir, f"{download_id}.txt")
             if os.path.exists(enc):
                 os.remove(enc)
+                self.logger.info(f"Deleted encrypted cookie: {enc}")
+                
+            # 2. Temporary decrypted cookie file
+            temp_cookie = os.path.join(self.cookies_dir, f".temp_{download_id}.txt")
+            if os.path.exists(temp_cookie):
+                os.remove(temp_cookie)
+                self.logger.info(f"Deleted temp cookie: {temp_cookie}")
+                
+            # 3. Temporary config file
+            temp_config = os.path.join(self.cookies_dir, f"config_{download_id}.json")
+            if os.path.exists(temp_config):
+                os.remove(temp_config)
+                self.logger.info(f"Deleted temp config: {temp_config}")
+                
         except Exception as e:
-            self.logger.error("Cookie cleanup %s: %s", download_id, e)
+            self.logger.error(f"Error cleaning up cookies/config for {download_id}: {e}")
+            
         return True
 
     def clear_history(self, session_id: Optional[str] = None) -> None:

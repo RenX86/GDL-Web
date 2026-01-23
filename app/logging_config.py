@@ -8,6 +8,7 @@ eliminating duplication between run.py and config classes.
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +32,12 @@ def setup_logging(log_level: str = "INFO", log_file: str = "app.log") -> logging
     logging.basicConfig(
         level=numeric_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_file)],
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            RotatingFileHandler(
+                log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+            ),
+        ],
         force=True,  # Ensure our configuration overrides any existing handlers/levels
     )
 
