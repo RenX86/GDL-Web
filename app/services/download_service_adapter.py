@@ -329,3 +329,11 @@ class DownloadServiceAdapter:
             'active_downloads': active_downloads,
             'session_id': session.get('session_id')
         }
+
+    def subscribe(self) -> Any:
+        """Subscribe to status updates"""
+        return self._service.subscribe()
+
+    def unsubscribe(self, q: Any) -> None:
+        """Unsubscribe from updates"""
+        self._service.unsubscribe(q)

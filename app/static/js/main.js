@@ -62,7 +62,7 @@ function startDownload() {
                 urlInput.value = '';
                 cookieInput.value = '';
                 showToast('Success', 'Download started successfully', 'success');
-                refreshDownloads();
+                // SSE handles refresh
                 // Ensure we are on the 'all' or 'active' filter to see it
                 if (statusFilter === 'completed' || statusFilter === 'error') {
                    document.getElementById('filterAll').click();
@@ -122,7 +122,7 @@ function deleteDownload(downloadId) {
         .then(data => {
             if (data.success) {
                 showToast('Deleted', 'Download removed', 'success');
-                refreshDownloads();
+                // SSE handles refresh
             } else {
                 showToast('Error', data.message, 'error');
             }
@@ -482,54 +482,74 @@ function createCardHtml(d) {
     `;
 }
 
-// --- Smart Polling Logic ---
+// --- Server-Sent Events (SSE) Logic ---
 
-function checkPollingStatus(downloads) {
-    // Check if any download is active
-    const hasActive = downloads.some(d => {
-        const s = normalizeStatus(d.status);
-        return ['starting', 'downloading', 'processing', 'retrying'].includes(s);
-    });
+function setupEventStream() {
+    const evtSource = new EventSource("/api/events");
 
-    if (hasActive) {
-        startPolling();
+    evtSource.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        
+        switch (msg.type) {
+            case 'initial':
+                renderDownloads(msg.data);
+                break;
+            case 'update':
+                updateOrAddCard(msg.data);
+                break;
+            case 'delete':
+                removeCard(msg.data.id);
+                break;
+            case 'clear':
+                document.getElementById('downloadsList').innerHTML = '';
+                renderDownloads([]); // Show empty state
+                break;
+        }
+    };
+
+    evtSource.onerror = (err) => {
+        console.error("EventSource failed:", err);
+        // EventSource automatically retries, but we can log connection status
+    };
+}
+
+function updateOrAddCard(d) {
+    const list = document.getElementById('downloadsList');
+    const cardId = `card-${d.id}`;
+    let card = document.getElementById(cardId);
+    
+    // Remove empty state if present
+    const emptyState = list.querySelector('.empty-state');
+    if (emptyState) emptyState.remove();
+
+    if (card) {
+        updateCard(card, d);
     } else {
-        stopPolling();
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = createCardHtml(d);
+        const newCard = tempDiv.firstElementChild;
+        newCard.id = cardId;
+        
+        // Insert at top (since we sort newest first usually)
+        list.insertBefore(newCard, list.firstChild);
     }
 }
 
-function startPolling() {
-    if (!refreshInterval) {
-        refreshInterval = setInterval(refreshDownloads, 2000); // 2s polling
-    }
-}
-
-function stopPolling() {
-    if (refreshInterval) {
-        clearInterval(refreshInterval);
-        refreshInterval = null;
-    }
-}
-
-// Update refreshDownloads to use smart polling
-function refreshDownloads() {
-    // Ensure session is marked active
-    if (!sessionStorage.getItem('downloadSessionActive')) {
-        sessionStorage.setItem('downloadSessionActive', 'true');
-    }
-
-    fetch('/api/downloads')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && Array.isArray(data.data)) {
-                renderDownloads(data.data);
-                checkPollingStatus(data.data);
+function removeCard(id) {
+    const card = document.getElementById(`card-${id}`);
+    if (card) {
+        card.classList.remove('animate__fadeInUp');
+        card.classList.add('animate__fadeOut');
+        setTimeout(() => card.remove(), 500);
+        
+        // Check if list is empty after removal
+        setTimeout(() => {
+            const list = document.getElementById('downloadsList');
+            if (list.children.length === 0) {
+                renderDownloads([]); // Restore empty state
             }
-        })
-        .catch(err => {
-            console.error(err);
-            stopPolling(); // Stop on error to prevent flooding
-        });
+        }, 550);
+    }
 }
 
 // ... (rest of code)
@@ -541,8 +561,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ... (listeners) ...
 
-    // Initial load - Fetch once, then smart polling takes over
-    refreshDownloads();
+    // Start SSE connection
+    setupEventStream();
 });
 
-// Remove the old startRefreshing function at the bottom
+// Remove old startRefreshing/polling code

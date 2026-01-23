@@ -69,6 +69,40 @@ class DownloadService:
         
         # Start janitor thread for cleanup
         self._start_janitor_thread()
+        
+        # Event listeners for SSE
+        self._listeners: List[Queue] = []
+
+    def subscribe(self) -> Queue:
+        """Subscribe to status updates"""
+        q = Queue()
+        with self._lock:
+            self._listeners.append(q)
+            # Send initial state immediately
+            initial_state = {
+                "type": "initial",
+                "data": list(self.download_status.values())
+            }
+            q.put(initial_state)
+        return q
+
+    def unsubscribe(self, q: Queue) -> None:
+        """Unsubscribe from updates"""
+        with self._lock:
+            if q in self._listeners:
+                self._listeners.remove(q)
+
+    def _notify_listeners(self, event_type: str, data: Any) -> None:
+        """Notify all listeners of an update"""
+        message = {"type": event_type, "data": data}
+        with self._lock:
+            # Iterate over a copy to handle removals during iteration if needed
+            for q in self._listeners:
+                try:
+                    q.put_nowait(message)
+                except Exception:
+                    # Queue full or closed, ignore
+                    pass
 
     def _set_status(self, download_id: str, **kwargs) -> None:
         """Atomic update (insert or merge)"""
@@ -76,6 +110,8 @@ class DownloadService:
             if download_id not in self.download_status:
                 self.download_status[download_id] = {}
             self.download_status[download_id].update(kwargs)
+            # Notify listeners of the update
+            self._notify_listeners("update", self.download_status[download_id])
 
     def _get_status_copy(self, download_id: str) -> Optional[Dict[str, Any]]:
         """Return a *deep* copy so caller cannot mutate the shared dict"""
@@ -916,6 +952,7 @@ class DownloadService:
         except Exception as e:
             self.logger.error(f"Error cleaning up cookies/config for {download_id}: {e}")
             
+        self._notify_listeners("delete", {"id": download_id})
         return True
 
     def clear_history(self, session_id: Optional[str] = None) -> None:
@@ -962,6 +999,8 @@ class DownloadService:
             for did in list(self._list_status_copy().keys()):
                 # Only call delete_download to ensure proper cleanup
                 self.delete_download(did)
+        
+        self._notify_listeners("clear", {})
 
     def get_statistics(self) -> Dict[str, Any]:
         data = self._list_status_copy().values()

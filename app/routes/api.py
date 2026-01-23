@@ -12,9 +12,42 @@ from ..exceptions import ResourceNotFoundError, ValidationError
 import os
 import io
 import zipfile
+import json
+from queue import Empty
 
 # Create blueprint for API routes
 api_bp = Blueprint("api", __name__)
+
+
+@api_bp.route("/events")
+def stream_events() -> Response:
+    """Server-Sent Events endpoint for real-time updates"""
+    download_service = cast(Any, current_app).service_registry.get("download_service")
+    
+    def stream():
+        q = download_service.subscribe()
+        try:
+            while True:
+                try:
+                    # Wait for message with timeout to allow checking connection
+                    message = q.get(timeout=30)
+                    yield f"data: {json.dumps(message)}\n\n"
+                except Empty:
+                    # Send heartbeat to keep connection alive
+                    yield ": heartbeat\n\n"
+        except GeneratorExit:
+            download_service.unsubscribe(q)
+        except Exception:
+            download_service.unsubscribe(q)
+
+    return Response(
+        stream(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable buffering for Nginx/proxies
+        }
+    )
 
 
 @api_bp.route("/download", methods=["POST"])
@@ -211,26 +244,33 @@ def list_download_files(download_id: str) -> Response:
     if not download_service.is_download_in_session(download_id):
         raise ResourceNotFoundError(f"Download with ID {download_id} not found in your session")
 
-    # Get download status to find the output directory
+    # Get download status
     status = download_service.get_download_status(download_id)
     if not status or not isinstance(status, dict):
         raise ResourceNotFoundError(f"Download status not available for {download_id}")
 
-    # Get the output directory for this download
-    output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
+    # Use the explicit file list if available to prevent session overlap
+    specific_files = status.get("downloaded_files_list", [])
     
-    # Use the actual output directory where files were saved, not a download-specific subdirectory
-    download_dir = output_dir
-
-    # List files in the actual output directory
-    if os.path.exists(download_dir):
-        files = list_directory_contents(download_dir, recursive=True)
+    files_to_format = []
+    
+    if specific_files:
+        # Use the specific files recorded during the download
+        for file_path in specific_files:
+            try:
+                if os.path.exists(file_path):
+                    files_to_format.append(get_file_info(file_path))
+            except Exception as e:
+                current_app.logger.warning(f"Could not get info for specific file {file_path}: {e}")
     else:
-        files = []
+        # Fallback: List files in the output directory (Legacy/Failed cases)
+        output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
+        if os.path.exists(output_dir):
+            files_to_format = list_directory_contents(output_dir, recursive=True)
 
     # Format file information for frontend
     formatted_files = []
-    for file_info in files:
+    for file_info in files_to_format:
         formatted_files.append({
             "name": file_info["name"],
             "size": format_file_size(file_info["size"]),
