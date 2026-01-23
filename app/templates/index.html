@@ -149,6 +149,22 @@
         </div>
     </div>
 
+    <!-- Video Preview Modal -->
+    <div class="modal fade" id="videoPreviewModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-xl">
+            <div class="modal-content bg-transparent border-0 shadow-none">
+                <div class="modal-body p-0 text-center position-relative">
+                    <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-3 z-3 bg-dark rounded-circle p-2" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <div class="ratio ratio-16x9 rounded shadow-lg overflow-hidden bg-black">
+                        <video id="previewVideo" controls autoplay class="w-100 h-100" style="max-height: 90vh;">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Clear Session Confirmation Modal -->
     <div class="modal fade" id="clearSessionModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">

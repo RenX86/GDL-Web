@@ -155,6 +155,25 @@ function openPreview(url) {
     }, { once: true });
 }
 
+function openVideo(url) {
+    const modalEl = document.getElementById('videoPreviewModal');
+    const video = document.getElementById('previewVideo');
+    
+    // Set video source
+    video.src = url;
+    
+    // Show modal
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+    
+    // Stop playback on hide
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        video.pause();
+        video.src = '';
+        video.load();
+    }, { once: true });
+}
+
 function showFiles(downloadId) {
     const listContainer = document.getElementById('filesListContainer');
     listContainer.innerHTML = '<div class="text-center p-4"><div class="spinner-border text-primary"></div></div>';
@@ -181,27 +200,42 @@ function showFiles(downloadId) {
                     </div>
                 `;
 
-                // Helper to check if file is image
+                // Helper to check file types
                 const isImage = (filename) => /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(filename);
+                const isVideo = (filename) => /\.(mp4|webm|ogg|mov)$/i.test(filename);
 
                 const gridHtml = `
                     <div class="file-grid">
                         ${data.files.map(file => {
                             const isImg = isImage(file.name);
+                            const isVid = isVideo(file.name);
                             const downloadUrl = `/api/download-file/${downloadId}/${file.name}`;
                             const previewUrl = `${downloadUrl}?preview=true`;
                             
-                            // Onclick handler for images, nothing for others (except download button)
-                            const clickAction = isImg ? `onclick="openPreview('${previewUrl}')"` : '';
-                            const cursorClass = isImg ? 'cursor-pointer' : '';
+                            // Determine Click Action & Class
+                            let clickAction = '';
+                            let cursorClass = '';
+                            let thumbnailContent = '<i class="bi bi-file-earmark-text file-icon-placeholder"></i>';
+
+                            if (isImg) {
+                                clickAction = `onclick="openPreview('${previewUrl}')"`;
+                                cursorClass = 'cursor-pointer';
+                                thumbnailContent = `<img src="${previewUrl}" class="file-thumbnail" loading="lazy" alt="${file.name}">`;
+                            } else if (isVid) {
+                                clickAction = `onclick="openVideo('${previewUrl}')"`;
+                                cursorClass = 'cursor-pointer';
+                                thumbnailContent = `
+                                    <div class="position-relative w-100 h-100 d-flex align-items-center justify-content-center bg-dark">
+                                        <i class="bi bi-play-circle-fill text-white fs-1 position-absolute z-2"></i>
+                                        <video src="${previewUrl}#t=0.1" class="file-thumbnail opacity-50" style="object-fit: cover;"></video>
+                                    </div>
+                                `;
+                            }
                             
                             return `
                                 <div class="file-card ${cursorClass}" title="${file.name}">
                                     <div class="file-thumbnail-container" ${clickAction}>
-                                        ${isImg 
-                                            ? `<img src="${previewUrl}" class="file-thumbnail" loading="lazy" alt="${file.name}">` 
-                                            : `<i class="bi bi-file-earmark-text file-icon-placeholder"></i>`
-                                        }
+                                        ${thumbnailContent}
                                     </div>
                                     <div class="file-card-body border-top">
                                         <div class="text-truncate fw-medium">${file.name}</div>

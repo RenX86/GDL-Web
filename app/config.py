@@ -49,11 +49,18 @@ class Config:
     # Gallery-dl Configuration
     GALLERY_DL_CONFIG = {
         "extractor": {
-            'filename': '{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}',
+            "filename": "{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}",
             "write-info-json": True,
+            "videos": True,  # Explicitly enable video downloads
+            "animation": True, # Enable animated files (gifs, etc)
         },
-        'instagram': {
-            'filename': 'PostBy_{username}_{post_shortcode}_{num}.{extension}'
+        "instagram": {
+            "filename": "PostBy_{username}_{post_shortcode}_{num}.{extension}",
+            "videos": True,
+        },
+        "twitter": {
+            "videos": True,
+            "retweets": False,
         },
         "wallhaven": {  # explicit if you want
             "filename": "wallhaven_{id}.{extension}"
