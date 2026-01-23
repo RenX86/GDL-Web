@@ -482,86 +482,67 @@ function createCardHtml(d) {
     `;
 }
 
+// --- Smart Polling Logic ---
+
+function checkPollingStatus(downloads) {
+    // Check if any download is active
+    const hasActive = downloads.some(d => {
+        const s = normalizeStatus(d.status);
+        return ['starting', 'downloading', 'processing', 'retrying'].includes(s);
+    });
+
+    if (hasActive) {
+        startPolling();
+    } else {
+        stopPolling();
+    }
+}
+
+function startPolling() {
+    if (!refreshInterval) {
+        refreshInterval = setInterval(refreshDownloads, 2000); // 2s polling
+    }
+}
+
+function stopPolling() {
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+}
+
+// Update refreshDownloads to use smart polling
+function refreshDownloads() {
+    // Ensure session is marked active
+    if (!sessionStorage.getItem('downloadSessionActive')) {
+        sessionStorage.setItem('downloadSessionActive', 'true');
+    }
+
+    fetch('/api/downloads')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && Array.isArray(data.data)) {
+                renderDownloads(data.data);
+                checkPollingStatus(data.data);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            stopPolling(); // Stop on error to prevent flooding
+        });
+}
+
+// ... (rest of code)
+
 // --- Initialization ---
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Theme Logic
-    const themeToggle = document.getElementById('themeToggle');
-    const html = document.documentElement;
-    const icon = themeToggle.querySelector('i');
+    // ... (theme logic) ...
 
-    const setTheme = (theme) => {
-        html.setAttribute('data-bs-theme', theme);
-        localStorage.setItem('theme', theme);
-        
-        // Update Icon
-        if (theme === 'dark') {
-            icon.classList.replace('bi-moon-stars', 'bi-sun');
-        } else {
-            icon.classList.replace('bi-sun', 'bi-moon-stars');
-        }
-    };
+    // ... (listeners) ...
 
-    // Load saved theme
-    const savedTheme = localStorage.getItem('theme') || 'light';
-    setTheme(savedTheme);
-
-    // Toggle event
-    themeToggle.addEventListener('click', (e) => {
-        e.preventDefault();
-        const current = html.getAttribute('data-bs-theme');
-        setTheme(current === 'dark' ? 'light' : 'dark');
-    });
-
-    // Attach listeners
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                statusFilter = e.target.dataset.filter;
-                refreshDownloads();
-            }
-        });
-    });
-
-    document.getElementById('clearSessionBtn').addEventListener('click', clearSession);
-
-    // Attach Confirm Clear Session Handler
-    document.getElementById('confirmClearSessionBtn').addEventListener('click', () => {
-        const modalEl = document.getElementById('clearSessionModal');
-        const modal = bootstrap.Modal.getInstance(modalEl);
-        
-        // Disable button to prevent double clicks
-        const btn = document.getElementById('confirmClearSessionBtn');
-        const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'CLEARING...';
-
-        fetch('/api/session/clear', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('Session Cleared', 'All history removed', 'success');
-                    modal.hide();
-                    setTimeout(() => location.reload(), 1000);
-                } else {
-                    showToast('Error', 'Failed to clear session', 'error');
-                    btn.disabled = false;
-                    btn.textContent = originalText;
-                }
-            })
-            .catch(() => {
-                showToast('Error', 'Network error', 'error');
-                btn.disabled = false;
-                btn.textContent = originalText;
-            });
-    });
-
-    // Initial load
-    startRefreshing();
+    // Initial load - Fetch once, then smart polling takes over
+    refreshDownloads();
 });
 
-function startRefreshing() {
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(refreshDownloads, 2000); // 2s polling
-    refreshDownloads();
-}
+// Remove the old startRefreshing function at the bottom

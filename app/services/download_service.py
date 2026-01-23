@@ -812,7 +812,7 @@ class DownloadService:
 
     def delete_download_files(self, download_id: str) -> None:
         """
-        Delete the files associated with a download.
+        Delete the files associated with a download and clean up empty directories.
 
         Args:
             download_id (str): The ID of the download to delete.
@@ -822,30 +822,70 @@ class DownloadService:
             files = status.get("downloaded_files_list", [])
             output_dir = status.get("output_dir")
             
-            # Strategy 1: Delete specific files if known
+            # 1. Delete specific files
             if files:
                 for file_path in files:
                     try:
-                        # Handle both absolute and relative paths
                         full_path = os.path.abspath(file_path)
                         if os.path.exists(full_path):
                             os.remove(full_path)
                             self.logger.info(f"Deleted file: {full_path}")
-                    except Exception as e:
-                        self.logger.error(f"Error deleting file {file_path}: {e}")
-                return
+                            
+                            # 2. Recursive empty directory cleanup
+                            # Start from the file's directory and go up
+                            current_dir = os.path.dirname(full_path)
+                            
+                            # Safety: Get the root downloads directory to prevent deleting it
+                            root_downloads_dir = os.path.abspath(self.config.get("DOWNLOADS_DIR", "downloads"))
+                            
+                            while True:
+                                # Stop if we reach the root downloads directory or system root
+                                if current_dir == root_downloads_dir or current_dir == os.path.dirname(current_dir):
+                                    break
+                                
+                                # Safety: Only delete if directory belongs to a user session (starts with 'user_') 
+                                # OR is a subdirectory within the output_dir
+                                is_safe_to_delete = False
+                                dir_name = os.path.basename(current_dir)
+                                
+                                # Check if it's a user directory or inside one
+                                if "user_" in full_path or (output_dir and output_dir in current_dir):
+                                    is_safe_to_delete = True
+                                
+                                if not is_safe_to_delete:
+                                    break
 
-            # Strategy 2: Legacy fallback (Safety check)
-            # Only delete output_dir if it looks like a dedicated directory (not shared)
-            # This is hard to guarantee, so we default to safety and log a warning.
-            # If the user really wants to delete the folder, they can manage it manually or we need better tracking.
+                                try:
+                                    # rmdir only works if directory is empty
+                                    os.rmdir(current_dir)
+                                    self.logger.info(f"Deleted empty directory: {current_dir}")
+                                    # Move up one level
+                                    current_dir = os.path.dirname(current_dir)
+                                except OSError:
+                                    # Directory not empty or other error, stop climbing
+                                    break
+                                    
+                    except Exception as e:
+                        self.logger.error(f"Error processing file/directory {file_path}: {e}")
+
+            # 3. Final cleanup check for the main output directory
+            # This catches cases where files list might be empty or incomplete
             if output_dir and os.path.exists(output_dir):
-                self.logger.warning(f"Skipping directory deletion for {download_id}: exact file list not available and bulk deletion is unsafe.")
-                # The previous behavior was:
-                # shutil.rmtree(output_dir)
-                # This is likely what was causing the "backend still has file" if rmtree failed silently,
-                # OR it was working but deleting TOO MUCH (if it worked).
-                # Since the user says files REMAIN, rmtree was likely failing (locked files?) or simply not called.
+                dirname = os.path.basename(output_dir)
+                # Only strictly delete 'user_' directories if they are empty
+                if dirname.startswith("user_"):
+                    try:
+                        # Attempt to remove if empty
+                        os.rmdir(output_dir)
+                        self.logger.info(f"Deleted empty session directory: {output_dir}")
+                    except OSError:
+                        # Directory not empty, likely contains untracked files/folders
+                        # FALLBACK: If we are sure this is a user session dir, force remove it
+                        try:
+                            self.logger.info(f"Force removing remaining session directory: {output_dir}")
+                            shutil.rmtree(output_dir)
+                        except Exception as e:
+                            self.logger.error(f"Failed to force remove directory {output_dir}: {e}")
 
     def delete_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:
