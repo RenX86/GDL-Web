@@ -4,14 +4,14 @@ services:
       context: .
     image: gdl-web-server:latest
     ports:
-      - 6969:6969
+      - "${PORT:-6969}:6969"
     volumes:
       # Use named volumes instead of local folders
       - gdl_downloads:/app/downloads
       - gdl_cookies:/app/secure_cookies
     environment:
       - FLASK_ENV=${FLASK_ENV}
-      - PORT=6969
+      # Removed hardcoded PORT so it can be inherited or default to internal
       - DOWNLOADS_DIR=/app/downloads
       - COOKIES_DIR=/app/secure_cookies
       # Secrets are loaded from .env file
