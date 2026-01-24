@@ -34,3 +34,5 @@ LICENSE
 README.md
 downloads/
 secure_cookies/
+.mypy_cache
+app.log
