@@ -62,6 +62,6 @@ RUN mkdir -p /app/downloads /app/secure_cookies && \
 # Switch back to appuser
 USER appuser
 
-EXPOSE 5000
+EXPOSE 6969
 
-CMD ["gunicorn", "--workers=1", "--threads=8", "--bind=0.0.0.0:5000", "--access-logfile=-", "run:app"]
+CMD ["gunicorn", "--workers=1", "--threads=8", "--bind=0.0.0.0:6969", "--access-logfile=-", "run:app"]
