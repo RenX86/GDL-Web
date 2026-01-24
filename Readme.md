@@ -2,6 +2,8 @@
 
 A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-dl) command-line tool that allows users to download media from various online platforms through an intuitive web interface. The application provides real-time download status tracking, session management, and secure cookie handling for authenticated downloads.
 
+![GDL-Web Interface](assets/Image1.png)
+
 ## 🌟 Features
 
 - **Web-based Interface**: User-friendly web interface for gallery-dl with responsive design
@@ -13,6 +15,14 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 - **Retry Logic**: Automatic retry mechanism for failed downloads due to network issues
 - **Security**: Secure cookie encryption, path traversal protection, and input validation
 - **Multi-user Support**: Session-based isolation to support multiple concurrent users
+
+## 📸 Gallery
+
+| Dashboard | Download Progress |
+|:---:|:---:|
+| ![Dashboard](assets/image2.png) | ![Progress](assets/image3.png) |
+| **File Inline View** | **Video Preview** |
+| ![File-Inline view](assets/image5.png) | ![Video Preview Available](assets/Image6.png) |
 
 ## 🛠️ Tech Stack
 
