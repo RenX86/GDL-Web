@@ -7,8 +7,8 @@ services:
       - "${PORT:-6969}:6969"
     volumes:
       # Use named volumes instead of local folders
-      - gdl_downloads:/app/downloads
-      - gdl_cookies:/app/secure_cookies
+      - downloads:/app/downloads
+      - cookies:/app/secure_cookies
     environment:
       - FLASK_ENV=${FLASK_ENV}
       # Removed hardcoded PORT so it can be inherited or default to internal
@@ -21,5 +21,5 @@ services:
 
 # Define the persistent storage volumes
 volumes:
-  gdl_downloads:
-  gdl_cookies:
+  downloads:
+  cookies:
