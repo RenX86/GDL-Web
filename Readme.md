@@ -29,7 +29,53 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 - Node.js/npm (for development scripts)
 - [gallery-dl](https://github.com/mikf/gallery-dl) - install with `pip install gallery-dl`
 
-## 🚀 Installation
+## 🐳 Docker Deployment (Recommended)
+
+The easiest way to run GDL-Web is using Docker. You can pull the pre-built image from Docker Hub.
+
+### 1. Run with Docker Compose (Easiest)
+
+Create a `compose.yaml` file:
+
+```yaml
+services:
+  server:
+    image: renx86/gdl-web:latest
+    ports:
+      - "6969:6969"
+    volumes:
+      - downloads:/app/downloads
+      - cookies:/app/secure_cookies
+    environment:
+      - SECRET_KEY=your_secure_random_key
+      - COOKIES_ENCRYPTION_KEY=your_fernet_key
+    restart: always
+
+volumes:
+  downloads:
+  cookies:
+```
+
+Run the application:
+```bash
+docker compose up -d
+```
+Access the interface at `http://localhost:6969`.
+
+### 2. Run with Docker CLI
+
+```bash
+docker run -d \
+  -p 6969:6969 \
+  -v gdl_downloads:/app/downloads \
+  -v gdl_cookies:/app/secure_cookies \
+  -e SECRET_KEY=your_secure_random_key \
+  -e COOKIES_ENCRYPTION_KEY=your_fernet_key \
+  --name gdl-web \
+  renx86/gdl-web:latest
+```
+
+## 🚀 Manual Installation
 
 1. **Clone the repository:**
 
