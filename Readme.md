@@ -20,9 +20,9 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 
 | Dashboard | Download Progress |
 |:---:|:---:|
-| ![Dashboard](assets/image2.png) | ![Progress](assets/image3.png) |
+| ![Dashboard](assets/Image2.png) | ![Progress](assets/Image3.png) |
 | **File Inline View** | **Video Preview** |
-| ![File-view](assets/image5.png) | ![Video-Preview](assets/Image6.png) |
+| ![File-view](assets/Image5.png) | ![Video-Preview](assets/Image6.png) |
 
 ## 🛠️ Tech Stack
 
