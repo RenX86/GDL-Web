@@ -1,23 +1,60 @@
-### Building and running your application
+# GDL-Web: The Gallery-DL Web Interface
 
-When you're ready, start your application by running:
-`docker compose up --build`.
+**GDL-Web** is a modern, lightweight web-based UI for the [gallery-dl](https://github.com/mikf/gallery-dl) command-line tool. It allows you to download image galleries and media from hundreds of supported platforms (Instagram, Twitter, etc.) directly through your browser.
 
-Your application will be available at <http://localhost:6969>.
+## ✨ Key Features
 
-### Deploying your application to the cloud
+* 🚀 **Lightweight Alpine Image:** Optimized Docker image (~200MB) for fast deployment.
+* 📊 **Real-Time Progress:** Live status updates via Server-Sent Events (SSE).
+* 🔒 **Secure Cookie Management:** Upload Netscape-format cookies to download private content safely (all cookies are encrypted at rest using Fernet).
+* 📁 **Session Isolation:** Each user has an isolated download directory to ensure privacy.
+* 📱 **Responsive Design:** Works beautifully on desktops, tablets, and mobile phones.
+* 💾 **Persistent Storage:** Volumes for downloads and configurations.
 
-First, build your image, e.g.: `docker build -t myapp .`.
-If your cloud uses a different CPU architecture than your development
-machine (e.g., you are on a Mac M1 and your cloud provider is amd64),
-you'll want to build the image for that platform, e.g.:
-`docker build --platform=linux/amd64 -t myapp .`.
+## 🚀 Quick Start
 
-Then, push it to your registry, e.g. `docker push myregistry.com/myapp`.
+The easiest way to run the application is using the pre-built image from Docker Hub.
 
-Consult Docker's [getting started](https://docs.docker.com/go/get-started-sharing/)
-docs for more detail on building and pushing.
+### Using Docker Compose
 
-### References
+Create a `compose.yaml` file:
 
-* [Docker's Python guide](https://docs.docker.com/language/python/)
+```yaml
+services:
+  server:
+    image: renx86/gdl-web:latest
+    ports:
+      - "6969:6969"
+    volumes:
+      - downloads:/app/downloads
+      - cookies:/app/secure_cookies
+    environment:
+      - SECRET_KEY=your_secure_random_key
+      - COOKIES_ENCRYPTION_KEY=your_fernet_key
+    restart: always
+
+volumes:
+  downloads:
+  cookies:
+```
+
+### Using Docker CLI
+
+```bash
+docker run -d \
+  -p 6969:6969 \
+  -v gdl_downloads:/app/downloads \
+  -v gdl_cookies:/app/secure_cookies \
+  -e SECRET_KEY=$(openssl rand -hex 32) \
+  -e COOKIES_ENCRYPTION_KEY=your_fernet_key \
+  --name gdl-web \
+  renx86/gdl-web:latest
+```
+
+## 🛠 Configuration
+
+The following environment variables are supported:
+
+* `SECRET_KEY`: Used for session signing.
+* `COOKIES_ENCRYPTION_KEY`: A Fernet-compatible key for encrypting stored cookies.
+* `PORT`: Internal port (default: 6969).
