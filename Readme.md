@@ -22,7 +22,7 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 |:---:|:---:|
 | ![Dashboard](assets/image2.png) | ![Progress](assets/image3.png) |
 | **File Inline View** | **Video Preview** |
-| ![File-Inline view](assets/image5.png) | ![Video Preview Available](assets/Image6.png) |
+| ![File-view](assets/image5.png) | ![Video-Preview](assets/Image6.png) |
 
 ## 🛠️ Tech Stack
 
@@ -67,9 +67,11 @@ volumes:
 ```
 
 Run the application:
+
 ```bash
 docker compose up -d
 ```
+
 Access the interface at `http://localhost:6969`.
 
 ### 2. Run with Docker CLI
