@@ -57,6 +57,21 @@
                     <div class="card-body">
                         <form id="downloadForm" onsubmit="event.preventDefault(); startDownload();">
                             <div class="mb-3">
+                                <label class="form-label fw-bold">Download Type</label>
+                                <div class="btn-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="downloadTool" id="toolGallery" value="gallery-dl" checked>
+                                    <label class="btn btn-outline-primary" for="toolGallery">
+                                        <i class="bi bi-images me-2"></i>Gallery
+                                    </label>
+
+                                    <input type="radio" class="btn-check" name="downloadTool" id="toolVideo" value="yt-dlp">
+                                    <label class="btn btn-outline-danger" for="toolVideo">
+                                        <i class="bi bi-youtube me-2"></i>Video
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
                                 <label for="mediaUrl" class="form-label fw-bold">Media URL</label>
                                 <div class="input-group">
                                     <span class="input-group-text bg-body-secondary"><i class="bi bi-link-45deg"></i></span>
@@ -180,6 +195,27 @@
                 <div class="modal-footer border-top border-dark bg-body-tertiary">
                     <button type="button" class="btn btn-outline-dark fw-bold" data-bs-dismiss="modal">CANCEL</button>
                     <button type="button" class="btn btn-danger fw-bold border-2 border-dark shadow-sm" id="confirmClearSessionBtn">YES, CLEAR EVERYTHING</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ISP Block Warning Modal -->
+    <div class="modal fade" id="ispBlockModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-3 border-dark">
+                <div class="modal-header border-bottom border-dark bg-danger text-white">
+                    <h5 class="modal-title fw-bold text-uppercase"><i class="bi bi-shield-lock-fill me-2"></i>Access Restricted</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body py-4 text-center">
+                    <div class="display-1 text-danger mb-3"><i class="bi bi-broadcast-pin"></i></div>
+                    <h4 class="fw-bold mb-3">Connection Blocked</h4>
+                    <p class="lead mb-4">Content unavailable due to government-mandated ISP restrictions.</p>
+                    <p class="text-body-secondary small">The connection was forcibly closed by the remote host. This typically indicates an ISP-level filter or geo-blocking.</p>
+                </div>
+                <div class="modal-footer border-top border-dark bg-body-tertiary justify-content-center">
+                    <button type="button" class="btn btn-dark fw-bold px-4" data-bs-dismiss="modal">Understood</button>
                 </div>
             </div>
         </div>

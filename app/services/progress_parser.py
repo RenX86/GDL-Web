@@ -6,6 +6,7 @@ This module provides functions for parsing gallery-dl output to extract progress
 
 import re
 import logging
+import os
 from typing import Dict, List, Any, Tuple
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,57 @@ def parse_progress(line: str, files_so_far: int = 0) -> Tuple[int, Dict[str, Any
         return files_so_far, updates
 
 
+def parse_progress_ytdlp(
+    line: str, files_so_far: int = 0
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Update progress bar from a yt-dlp console line.
+    """
+    updates: Dict[str, Any] = {}
+    line_lower = line.lower()
+    
+    try:
+        # 1. Standard download progress: [download]  23.5% of ...
+        if "[download]" in line:
+            # Extract percentage
+            pct_match = re.search(r"(\d+(?:\.\d+)?)%", line)
+            if pct_match:
+                pct = float(pct_match.group(1))
+                updates["progress"] = round(pct)
+                updates["status"] = "downloading"
+                # Clean up the message to be more readable
+                msg = line.replace("[download]", "").strip()
+                updates["message"] = msg
+
+            # Check if download finished (100%) to increment file count
+            if "100%" in line or "100.0%" in line:
+                updates["progress"] = 100
+                files_so_far += 1
+                updates["files_downloaded"] = files_so_far
+                return files_so_far, updates
+
+        # 2. Merging stage (usually the last step)
+        if "[merger]" in line_lower or "merging formats" in line_lower:
+            updates = {
+                "progress": 99,
+                "message": "Merging video and audio tracks..."
+            }
+            return files_so_far, updates
+            
+        # 3. Processing/Fixing metadata
+        if "[fixup" in line_lower or "fixing" in line_lower:
+            updates = {
+                "progress": 99,
+                "message": "Finalizing video file..."
+            }
+            return files_so_far, updates
+
+        return files_so_far, updates
+    except Exception as e:
+        logger.debug("parse_progress_ytdlp error: %s", e)
+        return files_so_far, updates
+
+
 def count_downloaded_files(stdout_lines: List[str]) -> int:
     """
     Count the number of files downloaded based on gallery-dl output.
@@ -93,6 +145,57 @@ def count_downloaded_files(stdout_lines: List[str]) -> int:
 
     return count
 
+
+def extract_downloaded_files_ytdlp(stdout_lines: List[str]) -> List[str]:
+    """
+    Extract the list of file paths downloaded based on yt-dlp output.
+    """
+    # First pass: Collect all potential files
+    potential_files = []
+    deleted_files = set()
+    
+    for line in stdout_lines:
+        line = line.strip()
+        # [download] Destination: ...
+        if "[download] Destination:" in line:
+            match = re.search(r'Destination:\s+(.*)$', line)
+            if match:
+                potential_files.append(match.group(1).strip())
+        # [Merger] Merging formats into "..."
+        elif "Merging formats into" in line:
+            # Handle format: [Merger] Merging formats into "C:\path\to\file.mp4"
+            # We want to extract the path inside the quotes
+            match = re.search(r'Merging formats into "(.*)"', line)
+            if match:
+                potential_files.append(match.group(1))
+            else:
+                # Fallback if no quotes or different format
+                parts = line.split("into ", 1)
+                if len(parts) > 1:
+                    potential_files.append(parts[1].strip().strip('"'))
+        # Already downloaded
+        elif "has already been downloaded" in line and "[download]" in line:
+            parts = line.replace("[download] ", "").split(" has already been downloaded")[0]
+            potential_files.append(parts.strip())
+        # Track deleted files: [yt-dlp-stdout] Deleting original file ...
+        elif "Deleting original file" in line:
+            # Handle format: Deleting original file C:\path\to\file.mp4 (pass -k to keep)
+            clean_line = line.replace("Deleting original file", "").strip()
+            # Remove the optional suffix
+            file_path = clean_line.split(" (pass -k to keep)")[0].strip()
+            # Normalize path for comparison
+            deleted_files.add(os.path.normpath(file_path))
+
+    # Second pass: Filter out deleted files
+    final_files = []
+    for f in potential_files:
+        # Normalize for comparison
+        norm_f = os.path.normpath(f)
+        # Check if this file was explicitly deleted
+        if norm_f not in deleted_files:
+            final_files.append(f)
+            
+    return list(set(final_files))  # unique
 
 def extract_downloaded_files(stdout_lines: List[str]) -> List[str]:
     """

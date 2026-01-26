@@ -1,15 +1,13 @@
 # Development dependencies
-pytest>=7.4.0
-pytest-flask>=1.2.0
-pytest-mock>=3.11.1
-pytest-cov>=4.1.0
-pytest-xdist>=3.3.1  # Parallel testing
+pytest==8.4.2
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+pytest-asyncio==0.24.0
+pytest-timeout==2.3.1
+pytest-html==4.1.1
+coverage==7.6.10
 
 # Code quality
-flake8>=6.0.0
-autopep8>=2.0.2
-black>=23.7.0
-isort>=5.12.0
 mypy>=1.5.1
 
 # Security

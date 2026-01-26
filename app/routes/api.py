@@ -67,6 +67,7 @@ def start_download() -> Response:
     data = request.get_json()
     url = data.get("url")
     cookies_content = data.get("cookies")
+    tool = data.get("tool", "gallery-dl")  # Default to gallery-dl
 
     # Get download service from registry
     download_service = cast(Any, current_app).service_registry.get("download_service")
@@ -76,7 +77,9 @@ def start_download() -> Response:
         raise ValueError("Invalid URL format")
 
     # Start download using config from Flask app
-    download_id = download_service.start_download(url, cookies_content=cookies_content)
+    download_id = download_service.start_download(
+        url, cookies_content=cookies_content, tool=tool
+    )
 
     return jsonify(
         {
@@ -265,10 +268,16 @@ def list_download_files(download_id: str) -> Response:
 
     if specific_files:
         # Use the specific files recorded during the download
+        output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
         for file_path in specific_files:
             try:
-                if os.path.exists(file_path):
-                    files_to_format.append(get_file_info(file_path))
+                # Handle relative paths by joining with output_dir
+                full_path = file_path
+                if not os.path.isabs(file_path):
+                    full_path = os.path.join(output_dir, file_path)
+                
+                if os.path.exists(full_path):
+                    files_to_format.append(get_file_info(full_path))
             except Exception as e:
                 current_app.logger.warning(
                     f"Could not get info for specific file {file_path}: {e}"
@@ -281,17 +290,27 @@ def list_download_files(download_id: str) -> Response:
 
     # Format file information for frontend
     formatted_files = []
+    output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
+    
     for file_info in files_to_format:
+        # Calculate relative path for correct URL construction in subdirectories
+        try:
+            rel_path = os.path.relpath(file_info["path"], output_dir)
+            # Normalize to forward slashes for URL consistency
+            display_name = rel_path.replace('\\', '/')
+        except ValueError:
+            display_name = file_info["name"]
+
         formatted_files.append(
             {
-                "name": file_info["name"],
+                "name": display_name,
                 "size": format_file_size(file_info["size"]),
                 "size_bytes": file_info["size"],
                 "type": file_info["mime_type"],
                 "extension": file_info["extension"],
                 "modified": file_info["modified"],
                 "download_url": (
-                    f"/api/download-file/{download_id}/{file_info['name']}"
+                    f"/api/download-file/{download_id}/{display_name}"
                     if file_info["is_file"]
                     else None
                 ),
@@ -312,8 +331,14 @@ def list_download_files(download_id: str) -> Response:
 @handle_api_errors
 def download_file(download_id: str, filename: str) -> Response:
     """Download a specific file from a completed download"""
-    # 1. Strip path traversal sequences and sanitise
-    filename = sanitize_filename(filename)
+    # 1. URL Decode the filename (Crucial for non-ASCII/Japanese filenames)
+    import urllib.parse
+    filename_decoded = urllib.parse.unquote(filename)
+    current_app.logger.debug(f"Decoded filename: {filename_decoded}")
+    
+    # 2. Sanitize (but keep unicode)
+    filename_sanitized = sanitize_filename(filename_decoded)
+    current_app.logger.debug(f"Sanitized filename: {filename_sanitized}")
 
     download_service = cast(Any, current_app).service_registry.get("download_service")
 
@@ -341,55 +366,77 @@ def download_file(download_id: str, filename: str) -> Response:
     # Get the absolute path to downloads directory
     downloads_dir = os.path.abspath(current_app.config["DOWNLOADS_DIR"])
 
-    # Use the actual output directory from the download status (already retrieved earlier)
+    # Use the actual output directory from the download status
     actual_output_dir = status.get("output_dir", downloads_dir)
     actual_output_dir = os.path.abspath(actual_output_dir)
 
-    # Look for the file in the actual output directory
+    # 1. Try direct path
     file_path = None
-    potential_path = os.path.join(actual_output_dir, filename)
+    potential_path = os.path.join(actual_output_dir, filename_sanitized)
     if os.path.exists(potential_path) and os.path.isfile(potential_path):
         file_path = potential_path
-
-    # If not found in the actual output directory, search recursively in the downloads directory
-    # This handles potential edge cases where file locations may vary
-    if not file_path and os.path.exists(downloads_dir):
-        # Search recursively for the file in the main downloads directory
-        for root, dirs, files in os.walk(downloads_dir):
-            if filename in files:
-                potential_path = os.path.join(root, filename)
-                if os.path.isfile(potential_path):
-                    file_path = potential_path
+    
+    # 2. If not found, try robust search (handles encoding/normalization mismatches)
+    if not file_path and os.path.exists(actual_output_dir):
+        current_app.logger.info(f"File not found directly at {potential_path}, searching recursively...")
+        
+        # Normalize target for comparison
+        target_norm = os.path.normpath(filename_sanitized).lower()
+        
+        for root, dirs, files in os.walk(actual_output_dir):
+            for file in files:
+                full_found_path = os.path.join(root, file)
+                # Calculate relative path from the output directory
+                rel_path = os.path.relpath(full_found_path, actual_output_dir)
+                
+                # Check for match (case-insensitive for Windows robustness)
+                # We check matches against the requested path AND just the filename
+                # This covers cases where the user requests 'video.mp4' but it's in 'youtube/video.mp4'
+                if (os.path.normpath(rel_path).lower() == target_norm or 
+                    file.lower() == os.path.basename(target_norm)):
+                    
+                    file_path = full_found_path
+                    current_app.logger.info(f"Found file via recursive search: {file_path}")
                     break
+            if file_path:
+                break
 
     if not file_path:
+        current_app.logger.error(f"File lookup failed. Target: {filename_sanitized}, Decoded: {filename_decoded}")
         raise ResourceNotFoundError(
-            f"File '{filename}' not found for download {download_id}"
+            f"File '{filename_sanitized}' not found for download {download_id}"
         )
-
-    # 2. Re-validate after join – defence in depth
-    if not is_safe_path(actual_output_dir, file_path):
-        raise ValidationError("Access denied: file path outside allowed directory")
 
     # Debug: Print the paths being used
     print(f"DEBUG: file_path={file_path}")
     print(f"DEBUG: downloads_dir={downloads_dir}")
-    print(f"DEBUG: filename={filename}")
+    print(f"DEBUG: filename={filename_sanitized}")
     print(f"DEBUG: actual_output_dir={actual_output_dir}")
 
     # Check if this is a preview request
     preview = request.args.get("preview", "false").lower() == "true"
 
     # Serve the file securely
+    # CRITICAL FIX: If we found the file, serve it directly from its parent folder.
+    # This avoids issues where actual_output_dir is 'downloads/user_id' but file is in 'downloads/user_id/youtube'
+    # and the relative path logic gets confused in secure_file_serve on Windows.
+    
+    serve_dir = os.path.dirname(file_path)
+    serve_name = os.path.basename(file_path)
+    
+    print(f"DEBUG: Calling secure_file_serve with:")
+    print(f"DEBUG: file_path (arg1) = {serve_name}")
+    print(f"DEBUG: base_directory (arg2) = {serve_dir}")
+    
     return secure_file_serve(
-        file_path, actual_output_dir, filename, as_attachment=not preview
+        serve_name, serve_dir, serve_name, as_attachment=not preview
     )
 
 
 @api_bp.route("/download-zip/<download_id>", methods=["GET"])
 @handle_api_errors
 def download_zip(download_id: str) -> Response:
-    """Download all files for a specific download ID as a single ZIP file (in-memory)"""
+    """Download all files for a specific download ID as a single ZIP file (via temp file)"""
     download_service = cast(Any, current_app).service_registry.get("download_service")
 
     if not download_service.download_exists(download_id):
@@ -408,34 +455,57 @@ def download_zip(download_id: str) -> Response:
         raise ValidationError("Download must be completed before zipping.")
 
     # Locate the directory
-    # Note: Using the output_dir from status, similar to list_download_files
     output_dir = status.get("output_dir", current_app.config["DOWNLOADS_DIR"])
 
     if not os.path.exists(output_dir) or not os.path.isdir(output_dir):
         raise ResourceNotFoundError("Download directory not found on server.")
 
-    # Create in-memory zip
-    memory_file = io.BytesIO()
+    # Use a temporary file instead of memory buffer to avoid OOM
+    import tempfile
+    
+    # Create a temp file; we'll close the handle but keep the path
+    fd, temp_path = tempfile.mkstemp(suffix=".zip", prefix=f"gdl_{download_id}_")
+    os.close(fd)
 
-    has_files = False
-    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(output_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                # Calculate arcname (relative path inside zip)
-                arcname = os.path.relpath(file_path, output_dir)
-                zf.write(file_path, arcname)
-                has_files = True
+    try:
+        has_files = False
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _, files in os.walk(output_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Calculate arcname (relative path inside zip)
+                    arcname = os.path.relpath(file_path, output_dir)
+                    zf.write(file_path, arcname)
+                    has_files = True
 
-    if not has_files:
-        raise ResourceNotFoundError("No files found to zip.")
+        if not has_files:
+            os.remove(temp_path)
+            raise ResourceNotFoundError("No files found to zip.")
 
-    # Rewind buffer
-    memory_file.seek(0)
-
-    return send_file(
-        memory_file,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name=f"gallery_{download_id}.zip",
-    )
+        # Use Flask's response.call_on_close for cleanup
+        # This avoids accumulating after_request handlers
+        response = send_file(
+            temp_path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"gallery_{download_id}.zip",
+        )
+        
+        @response.call_on_close
+        def cleanup_temp_zip() -> None:
+            """Clean up temporary ZIP file after response is sent"""
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    current_app.logger.debug(f"Cleaned up temp zip: {temp_path}")
+            except Exception as e:
+                current_app.logger.error(f"Failed to cleanup temp zip {temp_path}: {e}")
+        
+        return response
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        raise e

@@ -99,19 +99,36 @@ def validate_required_fields(required_fields: List[str]) -> Callable[[T], T]:
 def is_safe_path(base_path: str, target_path: str) -> bool:
     """
     Check if target_path is safely within base_path to prevent directory traversal.
-
-    Args:
-        base_path: The base directory path
-        target_path: The target path to check
-
-    Returns:
-        bool: True if target_path is safely within base_path
     """
     try:
-        base_real = os.path.realpath(base_path)
-        target_real = os.path.realpath(target_path)
-        return os.path.commonpath([base_real, target_real]) == base_real
-    except (ValueError, OSError):
+        # Get absolute, real paths
+        base_abs = os.path.abspath(os.path.realpath(base_path))
+        target_abs = os.path.abspath(os.path.realpath(target_path))
+        
+        # On Windows, normalize case
+        if os.name == 'nt':
+            base_abs = os.path.normcase(base_abs)
+            target_abs = os.path.normcase(target_abs)
+            
+        # Ensure base_abs ends with a separator so we only match full directory components
+        # e.g. prevents /tmp/data matching /tmp/data_secret
+        base_prefix = base_abs if base_abs.endswith(os.sep) else base_abs + os.sep
+        
+        # Safe if target is exactly the base (unlikely for file) or starts with the base prefix
+        # OR if the target's directory IS the base directory (direct child check)
+        is_safe = (target_abs == base_abs) or \
+                  target_abs.startswith(base_prefix) or \
+                  os.path.dirname(target_abs) == base_abs
+        
+        if not is_safe:
+            print(f"DEBUG: is_safe_path False.")
+            print(f"DEBUG: base_prefix: {base_prefix}")
+            print(f"DEBUG: target_abs:   {target_abs}")
+            print(f"DEBUG: dirname(target): {os.path.dirname(target_abs)}")
+            
+        return is_safe
+    except (ValueError, OSError) as e:
+        print(f"DEBUG: is_safe_path error: {e}")
         return False
 
 
@@ -263,10 +280,12 @@ def secure_file_serve(
 
     # Security check: ensure file is within base directory
     if not is_safe_path(base_real, file_real):
-        raise ValidationError("Access denied: invalid file path")
+         raise ValidationError("Access denied: invalid file path")
 
     # Check if file exists and is readable
     if not os.path.exists(file_real):
+        # Try to handle unicode path issues on Windows by looking for close matches
+        # or checking if the issue is normalization
         raise ResourceNotFoundError(f"File not found: {file_path}")
 
     if not os.path.isfile(file_real):
@@ -279,20 +298,36 @@ def secure_file_serve(
             mime_type = "application/octet-stream"  # Default to binary if type unknown
 
         # Use Flask's send_file for secure file serving with explicit MIME type and headers
-        filename = download_name or os.path.basename(file_real)
+        # Use the BASENAME of the real file for the download name to ensure it's valid
+        if not download_name:
+            download_name = os.path.basename(file_real)
+            
+        # Ensure download_name is safe (ascii only for headers usually, but Flask handles utf-8)
+        # We can just pass it to send_file
+        
         response = send_file(
             file_real,
             mimetype=mime_type,
             as_attachment=as_attachment,
-            download_name=filename,
+            download_name=download_name,
             conditional=True,  # Enable conditional responses for caching/previews
         )
 
         # Add explicit headers to ensure browser handles the file correctly
+        # Use RFC 2231 encoding for Unicode filenames in HTTP headers
+        import urllib.parse
         disposition = "attachment" if as_attachment else "inline"
-        response.headers["Content-Disposition"] = (
-            f'{disposition}; filename="{filename}"'
-        )
+        
+        # Try to create ASCII-safe filename, fallback to generic name
+        try:
+            ascii_name = download_name.encode('ascii').decode('ascii')
+            filename_header = f'{disposition}; filename="{ascii_name}"'
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            # Use percent-encoding for non-ASCII filenames (RFC 2231)
+            encoded_name = urllib.parse.quote(download_name.encode('utf-8'))
+            filename_header = f"{disposition}; filename*=UTF-8''{encoded_name}"
+        
+        response.headers["Content-Disposition"] = filename_header
         response.headers["X-Content-Type-Options"] = "nosniff"
 
         return response
@@ -345,11 +380,77 @@ def format_file_size(size_bytes: float) -> str:
 def sanitize_filename(filename: str) -> str:
     """
     Sanitise user-supplied filename to prevent directory traversal.
-    Removes path separators and resolves any '..' components.
+    Allows subdirectories, spaces, punctuation, AND UNICODE characters.
     """
-    # Pure-Python equivalent of Go's filepath.Clean
-    filename = os.path.normpath(filename).lstrip(os.sep)
-    # Drop any remaining path parts (keep basename only)
-    filename = os.path.basename(filename)
-    # Final secure_filename pass for Windows weirdness
-    return secure_filename(filename)
+    import re
+    # 1. Normalize path and remove leading separators/drive letters
+    # This prevents absolute paths and '..'
+    filename = os.path.normpath(filename).lstrip(os.sep).lstrip('/')
+    if os.name == 'nt':
+        # Handle Windows drive letters if present
+        filename = re.sub(r'^[a-zA-Z]:', '', filename).lstrip(os.sep)
+
+    # 2. Prevent directory traversal via '..'
+    parts = []
+    for part in re.split(r'[/\\]', filename):
+        if part == '..':
+            continue
+        
+        # 3. Permissive sanitization: Allow almost anything except control chars
+        # Instead of whitelist, we use blacklist for illegal chars
+        # Windows: < > : " / \ | ? * (but / \ are separators we handled)
+        # We cleaned / \ already. Now strip other dangerous chars from the *component*
+        clean_part = re.sub(r'[<>:"|?*]', '', part).strip()
+        
+        if clean_part:
+            parts.append(clean_part)
+    
+    sanitized = os.path.join(*parts) if parts else "downloaded_file"
+    
+    return sanitized
+
+
+def sanitize_error_message(raw_error: str) -> str:
+    """
+    Extract a user-friendly error message from a verbose log dump.
+    Hides system paths, sensitive info, and verbose debug data.
+    """
+    if not raw_error:
+        return "Unknown error"
+
+    lines = raw_error.split('\n')
+    clean_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        # Skip debug/info lines
+        if line.startswith(('[debug]', '[info]', 'Traceback', 'File "')):
+            continue
+        # Skip empty lines
+        if not line:
+            continue
+        
+        # Look for actual error indicators
+        if line.startswith(('ERROR:', 'Error:', 'Exception:', 'WARNING:')):
+            # Remove the prefix but keep the message
+            clean_message = line.split(':', 1)[1].strip()
+            # If it's a specific known error, simplify it further
+            if "WinError 10054" in clean_message:
+                return "Connection forcibly closed by remote host (ISP/Network Block)."
+            if "UNEXPECTED_EOF_WHILE_READING" in clean_message:
+                return "Connection forcibly closed by remote host (ISP/Network Block)."
+            if "404" in clean_message:
+                return "Resource not found (404)."
+            if "403" in clean_message:
+                return "Access denied (403)."
+            
+            clean_lines.append(clean_message)
+    
+    if not clean_lines:
+        # Fallback: if we filtered everything out, return a generic message
+        # but check for ISP block signature in the raw text just in case
+        if "10054" in raw_error:
+            return "Connection forcibly closed by remote host (ISP/Network Block)."
+        return "An internal error occurred during processing."
+        
+    return clean_lines[0]  # Return the first relevant error line found

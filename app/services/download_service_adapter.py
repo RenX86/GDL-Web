@@ -105,6 +105,7 @@ class DownloadServiceAdapter:
         url: str,
         output_dir: Optional[str] = None,
         cookies_content: Optional[str] = None,
+        tool: str = "gallery-dl",
     ) -> str:
         """
         Start a new download using the Download model.
@@ -114,6 +115,7 @@ class DownloadServiceAdapter:
             url (str): URL to download from
             output_dir (str, optional): Directory to save downloaded files
             cookies_content (str, optional): Cookie content for authenticated downloads
+            tool (str): Tool to use ('gallery-dl' or 'yt-dlp')
 
         Returns:
             str: Unique download ID for tracking
@@ -138,7 +140,7 @@ class DownloadServiceAdapter:
         download_id = cast(
             str,
             self._service.start_download(
-                url, output_dir, cookies_content, session_id=session_id
+                url, output_dir, cookies_content, session_id=session_id, tool=tool
             ),
         )
 
@@ -318,11 +320,16 @@ class DownloadServiceAdapter:
         """
         Clear all download history for the current session.
         """
+        # Always use the session ID from the session object if not explicitly provided
+        if not session_id:
+            session_id = session.get("session_id")
+
         if session_id:
             self._service.clear_history(session_id=session_id)
-
-        # Clear session tracking
-        self._set_session_downloads({})
+            # Clear session tracking only for this session
+            self._set_session_downloads({})
+        else:
+            self.logger.warning("Attempted to clear history without a valid session ID.")
 
     def get_statistics(self) -> Dict[str, Any]:
         """

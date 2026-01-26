@@ -8,3 +8,5 @@ itsdangerous==2.2.0
 click==8.1.7
 cryptography==46.0.1
 requests==2.32.5
+yt-dlp
+psutil

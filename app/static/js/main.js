@@ -38,6 +38,9 @@ function startDownload() {
     const spinner = document.getElementById('loadingSpinner');
     const btnText = startBtn.querySelector('.btn-text');
 
+    // Get selected tool
+    const tool = document.querySelector('input[name="downloadTool"]:checked').value;
+
     const url = urlInput.value.trim();
     
     if (!url) {
@@ -54,7 +57,11 @@ function startDownload() {
         fetch('/api/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: url, cookies: cookiesContent })
+            body: JSON.stringify({ 
+                url: url, 
+                cookies: cookiesContent,
+                tool: tool 
+            })
         })
         .then(response => response.json())
         .then(data => {
@@ -502,8 +509,11 @@ function setupEventStream() {
     };
 
     evtSource.onerror = (err) => {
-        console.error("EventSource failed:", err);
-        // EventSource automatically retries, but we can log connection status
+        // Only log if the connection was actually established and then failed, 
+        // or if it's not a standard page unload/refresh.
+        if (evtSource.readyState === EventSource.CLOSED) {
+            console.error("EventSource connection closed.");
+        }
     };
 }
 
@@ -512,6 +522,15 @@ function updateOrAddCard(d) {
     const cardId = `card-${d.id}`;
     let card = document.getElementById(cardId);
     
+    // Check for ISP block and show modal if it's the first time seeing it for this download
+    if (d.isp_block && !sessionStorage.getItem(`seen_isp_block_${d.id}`)) {
+        sessionStorage.setItem(`seen_isp_block_${d.id}`, 'true');
+        const modalEl = document.getElementById('ispBlockModal');
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+        console.log(`ISP Block warning displayed for download ${d.id}`);
+    }
+
     // Remove empty state if present
     const emptyState = list.querySelector('.empty-state');
     if (emptyState) emptyState.remove();
@@ -601,11 +620,22 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("Clear Session Button Found:", !!clearSessionBtn);
     
     if (clearSessionBtn) {
+        // Reset button state when modal opens
+        const modalElement = document.getElementById('clearSessionModal');
+        if (modalElement) {
+            modalElement.addEventListener('show.bs.modal', () => {
+                const confirmBtn = document.getElementById('confirmClearSessionBtn');
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = 'YES, CLEAR EVERYTHING';
+                }
+            });
+        }
+
         clearSessionBtn.addEventListener('click', (e) => {
             e.preventDefault(); // Prevent any default action
             console.log("Clear Session Clicked");
             try {
-                const modalElement = document.getElementById('clearSessionModal');
                 const modal = new bootstrap.Modal(modalElement);
                 modal.show();
             } catch (err) {
@@ -621,28 +651,43 @@ document.addEventListener('DOMContentLoaded', () => {
             const modalEl = document.getElementById('clearSessionModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             
-            // Disable button
-            const originalText = confirmBtn.textContent;
+            // 1. Force stop any playing video to release locks
+            const videoEl = document.getElementById('previewVideo');
+            if (videoEl) {
+                videoEl.pause();
+                videoEl.removeAttribute('src'); // Completely remove src
+                videoEl.load();
+            }
+            const imgEl = document.getElementById('previewImage');
+            if (imgEl) imgEl.src = "";
+            
+            // 2. Disable button immediately
+            const originalText = 'YES, CLEAR EVERYTHING';
             confirmBtn.disabled = true;
             confirmBtn.textContent = 'CLEARING...';
 
-            fetch('/api/session/clear', { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success) {
-                        showToast('Session Cleared', 'All history removed', 'success');
-                        modal.hide();
-                    } else {
-                        showToast('Error', 'Failed to clear session', 'error');
+            // 3. Wait a moment for the browser to close the connection and server to release the file handle
+            setTimeout(() => {
+                fetch('/api/session/clear', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('Session Cleared', 'All history removed', 'success');
+                            modal.hide();
+                            // Button will be reset by the show.bs.modal listener next time
+                        } else {
+                            showToast('Error', 'Failed to clear session', 'error');
+                            // Reset button manually on error
+                            confirmBtn.disabled = false;
+                            confirmBtn.textContent = originalText;
+                        }
+                    })
+                    .catch(() => {
+                        showToast('Error', 'Network error', 'error');
                         confirmBtn.disabled = false;
                         confirmBtn.textContent = originalText;
-                    }
-                })
-                .catch(() => {
-                    showToast('Error', 'Network error', 'error');
-                    confirmBtn.disabled = false;
-                    confirmBtn.textContent = originalText;
-                });
+                    });
+            }, 1000); // 1 second delay
         });
     }
 

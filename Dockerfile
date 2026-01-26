@@ -5,13 +5,15 @@ WORKDIR /build
 
 # Install build dependencies
 # cargo/rust is required for compiling cryptography if no wheel is found
+# linux-headers is required for psutil
 RUN apk add --no-cache \
     gcc \
     musl-dev \
     libffi-dev \
     openssl-dev \
     cargo \
-    python3-dev
+    python3-dev \
+    linux-headers
 
 # Create wheels for dependencies
 # This compiles anything that needs compiling in this disposable stage

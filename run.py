@@ -14,6 +14,9 @@ from app.logging_config import setup_logging
 
 def check_dependencies():
     """Check if required dependencies are installed"""
+    all_good = True
+    
+    # Check gallery-dl
     try:
         import subprocess
         result = subprocess.run(['gallery-dl', '--version'], 
@@ -25,15 +28,35 @@ def check_dependencies():
     except FileNotFoundError:
         print("❌ Error: gallery-dl is not installed!")
         print("Install it with: pip install gallery-dl")
-        return False
+        all_good = False
     except subprocess.TimeoutExpired:
         print("❌ Error: gallery-dl command timed out")
-        return False
+        all_good = False
     except Exception as e:
         print(f"❌ Error checking gallery-dl: {e}")
-        return False
+        all_good = False
+
+    # Check yt-dlp
+    try:
+        import subprocess
+        result = subprocess.run(['yt-dlp', '--version'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            print(f"✅ yt-dlp found: {result.stdout.strip()}")
+        else:
+            raise Exception("yt-dlp not working properly")
+    except FileNotFoundError:
+        print("❌ Error: yt-dlp is not installed!")
+        print("Install it with: pip install yt-dlp")
+        all_good = False
+    except subprocess.TimeoutExpired:
+        print("❌ Error: yt-dlp command timed out")
+        all_good = False
+    except Exception as e:
+        print(f"❌ Error checking yt-dlp: {e}")
+        all_good = False
     
-    return True
+    return all_good
 
 def main():
     """Main function to run the application"""
@@ -78,17 +101,39 @@ def main():
     
     if __name__ == '__main__':
         if config_name == "production":
-            print("❌ Refusing to start Flask dev server in production.")
-            print("   Use a WSGI server (gunicorn, uvicorn) instead.")
-            sys.exit(2)
+            if os.name != 'nt':
+                print("❌ Refusing to start Flask dev server in production.")
+                print("   Use a WSGI server (gunicorn, uvicorn) instead.")
+                sys.exit(2)
+            else:
+                print("⚠️  WARNING: Running Flask dev server in production mode (Windows detected).")
+                print("   This is not recommended for public deployments but allowed for local testing.")
 
         try:
-            # Run the Flask application using config values
-            app.run(
-                host=config_class.HOST,
-                port=port,
-                debug=config_class.DEBUG,
-                threaded=True  # Allow multiple concurrent requests
+            # We use Werkzeug's run_simple to gain control over the reloader
+            # This allows us to exclude the downloads and secure_cookies directories
+            from werkzeug.serving import run_simple
+            
+            # Print status
+            if config_class.DEBUG:
+                print(f"📡 Reloader active, ignoring: {config_class.DOWNLOADS_DIR}")
+
+            run_simple(
+                config_class.HOST,
+                port,
+                app,
+                use_reloader=config_class.DEBUG,
+                use_debugger=config_class.DEBUG,
+                threaded=True,
+                exclude_patterns=[
+                    '*downloads*', 
+                    '*secure_cookies*',
+                    '*.log',
+                    '*.part',
+                    '*.ytdl',
+                    '*.json',
+                    '*__pycache__*'
+                ]
             )
         except KeyboardInterrupt:
             print("\n👋 Shutting down gracefully...")
@@ -109,4 +154,9 @@ else:
     config_name = os.environ.get('FLASK_ENV', 'production')
     config_class = get_config(config_name)
     setup_logging(config_class.LOG_LEVEL, config_class.LOG_FILE)
+
+    # Check dependencies
+    if not check_dependencies():
+        print("❌ CRITICAL: Missing dependencies. Application functionality will be limited.")
+
     app = create_app(config_name)

@@ -12,12 +12,15 @@ import os
 import uuid
 import logging
 import shutil
+import shutil
 import json
+import io
 from threading import RLock
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from queue import Queue, Empty
 from contextlib import contextmanager
+from ..utils import sanitize_error_message
 from .network_utils import (
     check_network_connectivity,
     check_url_accessibility,
@@ -26,7 +29,9 @@ from .network_utils import (
 from .cookie_manager import encrypt_cookies, decrypt_cookies
 from .progress_parser import (
     parse_progress,
+    parse_progress_ytdlp,
     extract_downloaded_files,
+    extract_downloaded_files_ytdlp,
 )
 
 
@@ -225,6 +230,135 @@ class DownloadService:
                 and self.active_processes[download_id] is not None
             )
 
+    def _remove_readonly(self, func: Any, path: str, excinfo: Any) -> None:
+        """
+        ErrorHandler for shutil.rmtree to remove read-only files.
+        """
+        import stat
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
+    def _force_close_handles(self, path: str) -> None:
+        """
+        Forcefully close any file handles to the given path held by the current process.
+        This is a workaround for Windows file locking issues where Flask/Python
+        might keep a handle open (e.g., from send_file).
+        """
+        try:
+            import psutil
+            current_process = psutil.Process()
+            normalized_path = os.path.normcase(os.path.abspath(path))
+            
+            for handle in current_process.open_files():
+                if os.path.normcase(os.path.abspath(handle.path)) == normalized_path:
+                    try:
+                        # We found a handle to the file we want to delete.
+                        # There isn't a clean cross-platform way to close just this handle 
+                        # without low-level OS calls.
+                        # However, strictly for this deletion logic, we can try to find
+                        # the corresponding python file object if it exists in gc.
+                        pass
+                    except Exception:
+                        pass
+            
+            # More aggressive approach: Check all open file objects in memory
+            import gc
+            for obj in gc.get_objects():
+                try:
+                    if isinstance(obj, io.IOBase) and not obj.closed:
+                        # Check if this file object points to our target path
+                        if hasattr(obj, 'name') and obj.name:
+                            obj_path = os.path.normcase(os.path.abspath(obj.name))
+                            # Check exact match or if it's a temp zip related to this path
+                            if obj_path == normalized_path or (normalized_path in obj_path and ".zip" in obj_path):
+                                self.logger.warning(f"Force closing open file handle: {obj.name}")
+                                obj.close()
+                except Exception:
+                    # Accessing objects during GC iteration can be risky
+                    pass
+                    
+        except ImportError:
+            pass
+        except Exception as e:
+            self.logger.error(f"Error checking handles: {e}")
+
+    def _retry_fs_operation(self, func: Any, path: str, retries: int = 10, delay: float = 0.5) -> bool:
+        """
+        Retry a filesystem operation (like remove/rmdir) to handle Windows file locks.
+        Returns True if successful, False otherwise.
+        """
+        import gc
+        import stat
+        last_error = None
+        
+        # Pre-emptive cleanup
+        self._force_close_handles(path)
+        
+        for i in range(retries):
+            try:
+                # Attempt to clear read-only flag just in case
+                if os.path.exists(path):
+                    try:
+                        os.chmod(path, stat.S_IWRITE)
+                    except Exception:
+                        pass
+                
+                # If using rmtree, add the readonly handler
+                if func == shutil.rmtree:
+                    func(path, onerror=self._remove_readonly)
+                else:
+                    func(path)
+                return True
+            except OSError as e:
+                last_error = e
+                # WinError 32: The process cannot access the file because it is being used by another process
+                # WinError 5: Access is denied
+                # WinError 145: Directory not empty
+                if i == 0:
+                     # On first failure, try to run garbage collection to free up any lingering file handles
+                     gc.collect()
+                
+                if i < retries - 1:
+                    time.sleep(delay)
+                    continue
+
+        # If we reached here, all standard retries failed.
+        # Try the nuclear option: Identify and kill the process holding the lock (if psutil is available)
+        try:
+            import psutil
+            self.logger.warning(f"Standard deletion failed for {path}. Attempting to identify locking process...")
+            
+            killed_something = False
+            for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+                try:
+                    for f in proc.info['open_files'] or []:
+                        if os.path.abspath(f.path) == os.path.abspath(path):
+                            self.logger.warning(f"Found process holding lock: {proc.info['name']} (PID: {proc.info['pid']})")
+                            # Don't kill ourselves or critical system processes
+                            if proc.pid != os.getpid():
+                                proc.kill()
+                                self.logger.warning(f"Killed process {proc.info['name']} (PID: {proc.info['pid']})")
+                                killed_something = True
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            
+            if killed_something:
+                time.sleep(0.5)
+                try:
+                    func(path)
+                    self.logger.info(f"Successfully deleted {path} after killing locking process.")
+                    return True
+                except Exception as e:
+                    self.logger.error(f"Still failed to delete {path} after killing process: {e}")
+
+        except ImportError:
+            self.logger.debug("psutil not installed, cannot check for locking processes.")
+        except Exception as e:
+             self.logger.error(f"Error during nuclear option: {e}")
+
+        self.logger.warning(f"Failed to {func.__name__} {path} after {retries} attempts: {last_error}")
+        return False
+
     def _start_janitor_thread(self) -> None:
         """Start the background janitor thread for cleanup"""
         MAX_AGE = 4 * 60  # seconds (4 minutes)
@@ -302,6 +436,7 @@ class DownloadService:
         output_dir: str,
         cookies_content: Optional[str] = None,
         session_id: Optional[str] = None,
+        tool: str = "gallery-dl",
     ) -> str:
         """
         Start a new download and return download ID.
@@ -311,6 +446,7 @@ class DownloadService:
             output_dir (str): Directory to save downloaded files
             cookies_content (str, optional): Cookie content for authenticated downloads
             session_id (str, optional): The session ID of the user
+            tool (str): The tool to use ('gallery-dl' or 'yt-dlp')
 
         Returns:
             str: Unique download ID for tracking
@@ -323,7 +459,7 @@ class DownloadService:
             id=download_id,
             status="starting",
             progress=0,
-            message="Initializing download...",
+            message=f"Initializing {tool} download...",
             url=url,
             start_time=datetime.now().isoformat(),
             end_time=None,
@@ -332,11 +468,12 @@ class DownloadService:
             error=None,
             output_dir=output_dir,
             session_id=session_id,
+            tool=tool,
         )
 
         threading.Thread(
             target=self._download_worker,
-            args=(download_id, url, output_dir, cookies_content),
+            args=(download_id, url, output_dir, cookies_content, tool),
             daemon=True,
         ).start()
 
@@ -385,6 +522,7 @@ class DownloadService:
         url: str,
         output_dir: str,
         cookies_content: Optional[str] = None,
+        tool: str = "gallery-dl",
     ) -> None:
         """
         Background worker to handle the actual download with retry mechanism.
@@ -394,6 +532,7 @@ class DownloadService:
             url (str): URL to download from
             output_dir (str): Directory to save downloaded files
             cookies_content (str, optional): Cookie content for authenticated downloads
+            tool (str): Tool to use ('gallery-dl' or 'yt-dlp')
         """
         cookie_file_path = None
         retry_count = 0
@@ -436,53 +575,89 @@ class DownloadService:
                     self._set_status(
                         download_id,
                         status="downloading",
-                        message="Starting gallery-dl process...",
+                        message=f"Starting {tool} process...",
                     )
 
                 # ======  BUILD COMMAND  ======
-                cmd = ["gallery-dl"]
+                if tool == "yt-dlp":
+                    executable = shutil.which("yt-dlp")
+                    if not executable:
+                        raise FileNotFoundError("yt-dlp executable not found in PATH")
+                    cmd = [executable]
+                    # Basic yt-dlp config
+                    cmd.extend(["-P", output_dir])
+                    cmd.append("--verbose")
+                    # Increase retries for better reliability
+                    cmd.extend(["--retries", "5"])
+                    # Output template: Sanitize filename by replacing problematic chars
+                    # This prevents URL routing issues with full-width slashes, colons, etc.
+                    cmd.extend(["-o", "%(extractor)s/%(title).200B.%(ext)s", "--replace-in-metadata", "title", r"[／：＜＞｜？＊＂]", "_"])
+                    
+                    # Download best quality at 1080p or higher (matches CLI behavior)
+                    # bv* = best video (any codec), ba = best audio
+                    # This will download format 401+251 or similar high-quality formats
+                    cmd.extend(["-f", "bv*[height>=1080]+ba/b[height>=1080]/b"])
+                    
+                    # Force output to MP4 format instead of WebM
+                    cmd.extend(["--merge-output-format", "mp4"])
+                    
+                    # Prevent downloading entire playlists
+                    cmd.append("--no-playlist")
 
-                # Create a temporary config file for this download
-                gallery_dl_config = self.config.get("GALLERY_DL_CONFIG", {})
-                temp_config_path = os.path.join(
-                    self.cookies_dir, f"config_{download_id}.json"
-                )
+                    
+                else:
+                    # Default to gallery-dl
+                    executable = shutil.which("gallery-dl")
+                    if not executable:
+                        raise FileNotFoundError("gallery-dl executable not found in PATH")
+                    cmd = [executable]
 
-                # Structure the config correctly for gallery-dl
-                # Specific extractors like 'instagram' should be nested under 'extractor'
-                final_config: Dict[str, Any] = {"extractor": {}}
+                    # Create a temporary config file for this download
+                    gallery_dl_config = self.config.get("GALLERY_DL_CONFIG", {})
+                    temp_config_path = os.path.join(
+                        self.cookies_dir, f"config_{download_id}.json"
+                    )
 
-                if isinstance(gallery_dl_config, dict):
-                    for key, value in gallery_dl_config.items():
-                        if key == "extractor" and isinstance(value, dict):
-                            # Merge existing extractor config
-                            final_config["extractor"].update(value)
-                        else:
-                            # Move top-level extractor keys (like 'instagram') into 'extractor'
-                            final_config["extractor"][key] = value
+                    # Structure the config correctly for gallery-dl
+                    # Specific extractors like 'instagram' should be nested under 'extractor'
+                    final_config: Dict[str, Any] = {"extractor": {}}
 
-                try:
-                    with open(temp_config_path, "w") as f:
-                        json.dump(final_config, f, indent=2)
-                    cmd.extend(["--config", temp_config_path])
-                except Exception as e:
-                    self.logger.error(f"Failed to create temp config file: {e}")
-                    # Fallback to no config if writing fails, or maybe just log it
+                    if isinstance(gallery_dl_config, dict):
+                        for key, value in gallery_dl_config.items():
+                            if key == "extractor" and isinstance(value, dict):
+                                # Merge existing extractor config
+                                final_config["extractor"].update(value)
+                            else:
+                                # Move top-level extractor keys (like 'instagram') into 'extractor'
+                                final_config["extractor"][key] = value
 
-                # Increase sleep time to avoid rate limits
-                cmd.extend(["--sleep", "4-8"])
+                    try:
+                        with open(temp_config_path, "w") as f:
+                            json.dump(final_config, f, indent=2)
+                        cmd.extend(["--config", temp_config_path])
+                    except Exception as e:
+                        self.logger.error(f"Failed to create temp config file: {e}")
+                        # Fallback to no config if writing fails, or maybe just log it
+
+                    # Increase sleep time to avoid rate limits
+                    cmd.extend(["--sleep", "4-8"])
+
+                    cmd.extend(["-D", output_dir])
+                    cmd.append("--verbose")
+                    # Reduce internal retries
+                    cmd.extend(["--retries", "2"])
 
                 # Explicitly set User-Agent to mimic a real browser to avoid "Terms Violation"
-                # This matches a standard Chrome on Windows UA
+                # Updated to Chrome 130
                 cmd.extend(
                     [
                         "--user-agent",
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
                     ]
                 )
-
-                cmd.extend(["-D", output_dir])
-                cmd.append("--verbose")
+                
+                # Note: Removed ios client override as it requires PO tokens
+                # Default web client works better for most cases
 
                 # ======  COOKIE HANDLING  ======
                 temp_cookie_path = None
@@ -507,7 +682,8 @@ class DownloadService:
                 cmd.append(url)
 
                 self.logger.debug(
-                    "Starting gallery-dl with command: %s (cookies: %s)",
+                    "Starting %s with command: %s (cookies: %s)",
+                    tool,
                     cmd,
                     "yes" if cookies_content else "no",
                 )
@@ -589,14 +765,24 @@ class DownloadService:
                                 "Download appears stalled (no output for 5 minutes)"
                             )
 
+                        # --- Process Stdout ---
                         try:
                             line = q_stdout.get_nowait()
                             stdout_lines.append(line.strip())
-                            self.logger.info(f"[gallery-dl-stdout] {line.strip()}")
+                            self.logger.info(f"[{tool}-stdout] {line.strip()}")
 
-                            files_so_far, updates = parse_progress(line, files_so_far)
-                            if updates:
-                                self._set_status(download_id, **updates)
+                            if tool == "yt-dlp":
+                                files_so_far, updates = parse_progress_ytdlp(
+                                    line, files_so_far
+                                )
+                                if updates:
+                                    self._set_status(download_id, **updates)
+                            else:
+                                files_so_far, updates = parse_progress(
+                                    line, files_so_far
+                                )
+                                if updates:
+                                    self._set_status(download_id, **updates)
 
                             if any(
                                 err in line.lower()
@@ -606,17 +792,32 @@ class DownloadService:
                                     "network",
                                     "connection refused",
                                     "connection reset",
+                                    "remote host",
+                                    "unexpected_eof_while_reading",  # New detection
                                 ]
                             ):
                                 network_error_detected = True
+                                
+                                # Specific check for ISP Block signatures
+                                if "unexpected_eof_while_reading" in line.lower() or "winerror 10054" in line.lower():
+                                    self._set_status(download_id, isp_block=True)
+                            
                             last_output_time = current_time
                         except Empty:
                             pass
 
+                        # --- Process Stderr (yt-dlp sends progress here too sometimes) ---
                         try:
                             line = q_stderr.get_nowait()
                             stderr_lines.append(line.strip())
-                            self.logger.info(f"[gallery-dl-stderr] {line.strip()}")
+                            self.logger.info(f"[{tool}-stderr] {line.strip()}")
+                            
+                            # Also try to parse progress from stderr for yt-dlp
+                            if tool == "yt-dlp":
+                                _, updates_err = parse_progress_ytdlp(line, files_so_far)
+                                if updates_err:
+                                    self._set_status(download_id, **updates_err)
+
                             if any(
                                 err in line.lower()
                                 for err in [
@@ -625,9 +826,16 @@ class DownloadService:
                                     "network",
                                     "connection refused",
                                     "connection reset",
+                                    "remote host",
+                                    "unexpected_eof_while_reading", # New detection
                                 ]
                             ):
                                 network_error_detected = True
+
+                                # Specific check for ISP Block signatures
+                                if "unexpected_eof_while_reading" in line.lower() or "winerror 10054" in line.lower():
+                                    self._set_status(download_id, isp_block=True)
+
                             last_output_time = current_time
                         except Empty:
                             pass
@@ -672,7 +880,24 @@ class DownloadService:
                     return_code = process.returncode if process else None
 
                 if return_code == 0:
-                    files_list = extract_downloaded_files(stdout_lines)
+                    if tool == "yt-dlp":
+                        raw_files = extract_downloaded_files_ytdlp(stdout_lines)
+                        files_list = []
+                        for f in raw_files:
+                            # 1. Normalize path
+                            if not os.path.isabs(f):
+                                full_p = os.path.join(output_dir, f)
+                            else:
+                                full_p = f
+                            
+                            # 2. Check existence (filters out deleted temp parts)
+                            if os.path.exists(full_p):
+                                files_list.append(full_p)
+                            else:
+                                self.logger.debug(f"Skipping non-existent file from log: {full_p}")
+                    else:
+                        files_list = extract_downloaded_files(stdout_lines)
+
                     self._set_status(
                         download_id,
                         status="completed",
@@ -687,6 +912,30 @@ class DownloadService:
 
                     status = self._get_status_copy(download_id)
                     files_count = status.get("files_downloaded", 0) if status else 0
+                    
+                    # Fallback: If parser found 0 files but process succeeded, 
+                    # scan the directory for new files manually.
+                    if files_count == 0:
+                        self.logger.info("Parser found 0 files, scanning output directory for valid media...")
+                        found_files = []
+                        valid_exts = ('.mp4', '.mkv', '.webm', '.mp3', '.m4a', '.jpg', '.png', '.webp')
+                        try:
+                            for root, _, files in os.walk(output_dir):
+                                for file in files:
+                                    if file.lower().endswith(valid_exts):
+                                        found_files.append(os.path.join(root, file))
+                            
+                            if found_files:
+                                self.logger.info(f"Fallback scan found {len(found_files)} files.")
+                                self._set_status(
+                                    download_id,
+                                    files_downloaded=len(found_files),
+                                    downloaded_files_list=found_files
+                                )
+                                files_count = len(found_files)
+                        except Exception as e:
+                            self.logger.error(f"Fallback scan failed: {e}")
+
                     self.logger.info(
                         "Download %s completed: %s files downloaded",
                         download_id,
@@ -701,6 +950,19 @@ class DownloadService:
 
                 if process_exists:
                     error_message = "\n".join(stderr_lines) or "Unknown error occurred"
+                    
+                    # Abort retries if an ISP block was detected during output parsing
+                    status = self._get_status_copy(download_id)
+                    if status and status.get("isp_block"):
+                        self._set_status(
+                            download_id,
+                            status="failed",
+                            message="Download blocked by ISP/Government restrictions.",
+                            end_time=datetime.now().isoformat(),
+                            error="Connection forcibly closed by remote host (ISP/Network Block)."
+                        )
+                        break
+
                     if network_error_detected or self._is_retriable_error(
                         error_message
                     ):
@@ -712,20 +974,22 @@ class DownloadService:
                             )
                             last_error = error_message
                             retry_count += 1
+                            time.sleep(self.retry_delay)  # Wait before retrying
                             continue
 
+                    sanitized_error = sanitize_error_message(error_message)
                     self._set_status(
                         download_id,
                         status="failed",
-                        message=f"Download failed after {retry_count} retries: {error_message}",
+                        message=f"Download failed: {sanitized_error}",
                         end_time=datetime.now().isoformat(),
-                        error=error_message,
+                        error=sanitized_error,
                         retry_count=retry_count,
                     )
                     self.logger.error(
                         "Download %s failed: %s (retry_count=%s)",
                         download_id,
-                        error_message,
+                        error_message, # Log full error internally
                         retry_count,
                     )
                     break
@@ -743,9 +1007,9 @@ class DownloadService:
                     self._set_status(
                         download_id,
                         status="failed",
-                        message="Download could not be started (bad URL, cookies, or rate-limit).",
+                        message="Download could not be started.",
                         end_time=datetime.now().isoformat(),
-                        error=last_error,
+                        error=sanitize_error_message(last_error),
                     )
                     break  # do NOT retry
 
@@ -755,12 +1019,13 @@ class DownloadService:
                     continue
 
                 # exhausted retries
+                sanitized_error = sanitize_error_message(last_error)
                 self._set_status(
                     download_id,
                     status="failed",
-                    message=f"Error after {retry_count} retries: {last_error}",
+                    message=f"Error after {retry_count} retries: {sanitized_error}",
                     end_time=datetime.now().isoformat(),
-                    error=last_error,
+                    error=sanitized_error,
                     retry_count=retry_count,
                 )
                 self.logger.error(
@@ -955,8 +1220,10 @@ class DownloadService:
                     try:
                         full_path = os.path.abspath(file_path)
                         if os.path.exists(full_path):
-                            os.remove(full_path)
-                            self.logger.info(f"Deleted file: {full_path}")
+                            if self._retry_fs_operation(os.remove, full_path):
+                                self.logger.info(f"Deleted file: {full_path}")
+                            else:
+                                continue  # Skip directory cleanup if file deletion failed
 
                             # 2. Recursive empty directory cleanup
                             # Start from the file's directory and go up
@@ -990,12 +1257,15 @@ class DownloadService:
 
                                 try:
                                     # rmdir only works if directory is empty
-                                    os.rmdir(current_dir)
-                                    self.logger.info(
-                                        f"Deleted empty directory: {current_dir}"
-                                    )
-                                    # Move up one level
-                                    current_dir = os.path.dirname(current_dir)
+                                    if self._retry_fs_operation(os.rmdir, current_dir):
+                                        self.logger.info(
+                                            f"Deleted empty directory: {current_dir}"
+                                        )
+                                        # Move up one level
+                                        current_dir = os.path.dirname(current_dir)
+                                    else:
+                                        # Directory not empty or other error, stop climbing
+                                        break
                                 except OSError:
                                     # Directory not empty or other error, stop climbing
                                     break
@@ -1013,22 +1283,26 @@ class DownloadService:
                 if dirname.startswith("user_"):
                     try:
                         # Attempt to remove if empty
-                        os.rmdir(output_dir)
-                        self.logger.info(
-                            f"Deleted empty session directory: {output_dir}"
-                        )
-                    except OSError:
-                        # Directory not empty, likely contains untracked files/folders
-                        # FALLBACK: If we are sure this is a user session dir, force remove it
-                        try:
+                        if self._retry_fs_operation(os.rmdir, output_dir):
                             self.logger.info(
-                                f"Force removing remaining session directory: {output_dir}"
+                                f"Deleted empty session directory: {output_dir}"
                             )
-                            shutil.rmtree(output_dir)
-                        except Exception as e:
-                            self.logger.error(
-                                f"Failed to force remove directory {output_dir}: {e}"
-                            )
+                        else:
+                             # Directory not empty, likely contains untracked files/folders
+                             # FALLBACK: If we are sure this is a user session dir, force remove it
+                             try:
+                                 self.logger.info(
+                                     f"Force removing remaining session directory: {output_dir}"
+                                 )
+                                 # Use rmtree as last resort to kill everything in the user dir
+                                 self._retry_fs_operation(shutil.rmtree, output_dir)
+                             except Exception as e:
+                                 self.logger.error(
+                                     f"Failed to force remove directory {output_dir}: {e}"
+                                 )
+
+                    except OSError:
+                         pass
 
     def delete_download(self, download_id: str) -> bool:
         if download_id in self.active_processes:
@@ -1041,20 +1315,20 @@ class DownloadService:
             # 1. Encrypted cookie file
             enc = os.path.join(self.cookies_dir, f"{download_id}.txt")
             if os.path.exists(enc):
-                os.remove(enc)
-                self.logger.info(f"Deleted encrypted cookie: {enc}")
+                if self._retry_fs_operation(os.remove, enc):
+                    self.logger.info(f"Deleted encrypted cookie: {enc}")
 
             # 2. Temporary decrypted cookie file
             temp_cookie = os.path.join(self.cookies_dir, f".temp_{download_id}.txt")
             if os.path.exists(temp_cookie):
-                os.remove(temp_cookie)
-                self.logger.info(f"Deleted temp cookie: {temp_cookie}")
+                if self._retry_fs_operation(os.remove, temp_cookie):
+                    self.logger.info(f"Deleted temp cookie: {temp_cookie}")
 
             # 3. Temporary config file
             temp_config = os.path.join(self.cookies_dir, f"config_{download_id}.json")
             if os.path.exists(temp_config):
-                os.remove(temp_config)
-                self.logger.info(f"Deleted temp config: {temp_config}")
+                if self._retry_fs_operation(os.remove, temp_config):
+                    self.logger.info(f"Deleted temp config: {temp_config}")
 
         except Exception as e:
             self.logger.error(
@@ -1088,10 +1362,10 @@ class DownloadService:
                         dirname = os.path.basename(directory)
                         if dirname.startswith("user_"):
                             # Force remove the entire directory and its contents
-                            shutil.rmtree(directory)
-                            self.logger.info(
-                                f"Force removed session directory: {directory}"
-                            )
+                            if self._retry_fs_operation(shutil.rmtree, directory):
+                                self.logger.info(
+                                    f"Force removed session directory: {directory}"
+                                )
                 except OSError as e:
                     self.logger.warning(
                         f"Failed to remove session directory {directory}: {e}"

@@ -20,9 +20,18 @@ class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
     # Application Configuration
-    DOWNLOADS_DIR = os.environ.get("DOWNLOADS_DIR") or os.path.join(
-        os.getcwd(), "downloads"
-    )
+    _downloads_dir = os.environ.get("DOWNLOADS_DIR")
+    
+    # Intelligent path handling for Windows vs Linux/Docker
+    if os.name == 'nt':
+        # If we are on Windows but the config is set to a Linux path (like /app/downloads from Dockerfile)
+        # we should ignore it and use a local folder to avoid confusion (C:\app\downloads)
+        if _downloads_dir and _downloads_dir.startswith('/'):
+            print(f"⚠️  Windows detected: Ignoring Linux path '{_downloads_dir}' for DOWNLOADS_DIR.")
+            _downloads_dir = None
+            
+    # Default to 'downloads' in current working directory if not set or invalid
+    DOWNLOADS_DIR = os.path.abspath(_downloads_dir or os.path.join(os.getcwd(), "downloads"))
     MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 16MB
 
     # Security Configuration
@@ -72,8 +81,9 @@ class Config:
     @classmethod
     def init_app(cls, app: Flask) -> None:
         """Initialize application with this config"""
-        # Create downloads directory
-        Path(cls.DOWNLOADS_DIR).mkdir(exist_ok=True)
+        # Create directories
+        os.makedirs(cls.DOWNLOADS_DIR, exist_ok=True)
+        os.makedirs(cls.COOKIES_DIR, exist_ok=True)
 
         # Apply all config to Flask app
         app.config.update(
