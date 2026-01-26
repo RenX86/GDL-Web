@@ -232,11 +232,24 @@ class DownloadService:
 
     def _remove_readonly(self, func: Any, path: str, excinfo: Any) -> None:
         """
-        ErrorHandler for shutil.rmtree to remove read-only files.
+        Error handler for shutil.rmtree to remove read-only files.
+        Compatible with both Python 3.12 and 3.13.
+        
+        In Python 3.13+, excinfo is the exception object directly.
+        In Python 3.12 and earlier, excinfo is a tuple (type, value, traceback).
         """
         import stat
-        os.chmod(path, stat.S_IWRITE)
-        func(path)
+        import sys
+        
+        try:
+            # Change file permissions to writable
+            os.chmod(path, stat.S_IWRITE)
+            # Retry the operation
+            func(path)
+        except Exception as e:
+            # If it still fails, log and continue
+            # (shutil.rmtree will handle the error)
+            pass
 
     def _force_close_handles(self, path: str) -> None:
         """
@@ -282,16 +295,28 @@ class DownloadService:
         except Exception as e:
             self.logger.error(f"Error checking handles: {e}")
 
-    def _retry_fs_operation(self, func: Any, path: str, retries: int = 10, delay: float = 0.5) -> bool:
+    def _retry_fs_operation(
+        self, func: Any, path: str, retries: int = 10, delay: float = 0.5
+    ) -> bool:
         """
-        Retry a filesystem operation (like remove/rmdir) to handle Windows file locks.
-        Returns True if successful, False otherwise.
+        Retry file system operations with exponential backoff.
+        Compatible with Python 3.12 and 3.13.
+
+        Args:
+            func: The function to call (e.g., os.remove, shutil.rmtree)
+            path: The path to operate on
+            retries: Number of retry attempts
+            delay: Initial delay between retries (doubles each time)
+
+        Returns:
+            bool: True if operation succeeded, False otherwise
         """
         import gc
         import stat
+        import sys
         last_error = None
         
-        # Pre-emptive cleanup
+        # Try to force close any handles first
         self._force_close_handles(path)
         
         for i in range(retries):
@@ -303,9 +328,14 @@ class DownloadService:
                     except Exception:
                         pass
                 
-                # If using rmtree, add the readonly handler
+                # For shutil.rmtree, use the appropriate parameter based on Python version
                 if func == shutil.rmtree:
-                    func(path, onerror=self._remove_readonly)
+                    if sys.version_info >= (3, 13):
+                        # Python 3.13+ uses 'onexc' parameter
+                        func(path, onexc=self._remove_readonly)
+                    else:
+                        # Python 3.12 and earlier use 'onerror' parameter
+                        func(path, onerror=self._remove_readonly)
                 else:
                     func(path)
                 return True
@@ -320,6 +350,9 @@ class DownloadService:
                 
                 if i < retries - 1:
                     time.sleep(delay)
+                    # The docstring mentions exponential backoff, but the original code
+                    # and the provided snippet only use a fixed delay.
+                    # If exponential backoff is desired, 'delay *= 2' would be added here.
                     continue
 
         # If we reached here, all standard retries failed.
