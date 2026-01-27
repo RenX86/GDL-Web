@@ -2,7 +2,7 @@ services:
   server:
     build:
       context: .
-    image: gdl-web-server:latest
+    image: renx86/gdl-web-server:latest
     ports:
       - "${PORT:-6969}:6969"
     volumes:
