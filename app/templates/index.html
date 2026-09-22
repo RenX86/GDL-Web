@@ -87,10 +87,16 @@
                             </div>
 
                             <div class="d-grid gap-2">
-                                <button type="submit" class="btn btn-primary btn-lg" id="startBtn">
-                                    <span class="spinner-border spinner-border-sm d-none" id="loadingSpinner" role="status" aria-hidden="true"></span>
-                                    <span class="btn-text"><i class="bi bi-download me-2"></i>Start Download</span>
-                                </button>
+                                <div class="d-flex gap-2">
+                                    <button type="button" id="fetchFormatsBtn" class="btn btn-outline-secondary d-none" onclick="fetchFormats()">
+                                        <span class="btn-text"><i class="bi bi-list-columns-reverse me-2"></i>Advanced Formats</span>
+                                        <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                    </button>
+                                    <button type="submit" class="btn btn-primary flex-grow-1" id="startBtn">
+                                        <span class="spinner-border spinner-border-sm d-none" id="loadingSpinner" role="status" aria-hidden="true"></span>
+                                        <span class="btn-text"><i class="bi bi-download me-2"></i>Start Download</span>
+                                    </button>
+                                </div>
                                 <button type="button" class="btn btn-outline-danger" id="clearSessionBtn">
                                     <i class="bi bi-trash3 me-2"></i>Clear Session
                                 </button>
@@ -199,6 +205,69 @@
                             Your browser does not support the video tag.
                         </video>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Format Selection Modal -->
+    <div class="modal fade" id="formatSelectionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-collection-play me-2"></i>Select Format</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex align-items-center mb-4">
+                        <img id="formatModalThumb" src="" alt="Thumbnail" class="rounded me-3 shadow-sm d-none" style="width: 120px; object-fit: cover;">
+                        <h6 id="formatModalTitle" class="fw-bold mb-0 text-truncate">Loading...</h6>
+                    </div>
+                    
+                    <ul class="nav nav-tabs" id="formatTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="combined-tab" data-bs-toggle="tab" data-bs-target="#combined" type="button" role="tab">Pre-Combined (Easy)</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="custom-tab" data-bs-toggle="tab" data-bs-target="#custom" type="button" role="tab">Custom (Video + Audio)</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content pt-3" id="formatTabsContent">
+                        <!-- Pre-Combined Tab -->
+                        <div class="tab-pane fade show active" id="combined" role="tabpanel">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Select Quality</label>
+                                <select class="form-select" id="combinedFormatSelect">
+                                    <option value="">Loading...</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Custom Tab -->
+                        <div class="tab-pane fade" id="custom" role="tabpanel">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Video Track</label>
+                                    <select class="form-select" id="videoFormatSelect">
+                                        <option value="">Loading...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Audio Track</label>
+                                    <select class="form-select" id="audioFormatSelect">
+                                        <option value="">Loading...</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-text mt-2"><i class="bi bi-info-circle me-1"></i>Video and Audio will be automatically merged using FFmpeg.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-body-tertiary">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary px-4" onclick="startCustomDownload()">
+                        <i class="bi bi-download me-1"></i>Download Selected
+                    </button>
                 </div>
             </div>
         </div>

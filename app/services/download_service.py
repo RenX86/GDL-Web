@@ -470,6 +470,7 @@ class DownloadService:
         cookies_content: Optional[str] = None,
         session_id: Optional[str] = None,
         tool: str = "gallery-dl",
+        format_id: Optional[str] = None,
     ) -> str:
         """
         Start a new download and return download ID.
@@ -480,6 +481,7 @@ class DownloadService:
             cookies_content (str, optional): Cookie content for authenticated downloads
             session_id (str, optional): The session ID of the user
             tool (str): The tool to use ('gallery-dl' or 'yt-dlp')
+            format_id (str, optional): Specific format ID to download for yt-dlp
 
         Returns:
             str: Unique download ID for tracking
@@ -506,7 +508,7 @@ class DownloadService:
 
         threading.Thread(
             target=self._download_worker,
-            args=(download_id, url, output_dir, cookies_content, tool),
+            args=(download_id, url, output_dir, cookies_content, tool, format_id),
             daemon=True,
         ).start()
 
@@ -516,6 +518,105 @@ class DownloadService:
             with open(cookie_file_path, "w") as f:
                 f.write(encrypted)
         return download_id
+
+    def fetch_formats(self, url: str, cookies_content: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Fetch available formats for a URL using yt-dlp.
+
+        Args:
+            url (str): URL to fetch formats for
+            cookies_content (str, optional): Cookie content for authenticated requests
+
+        Returns:
+            Dict containing video_only, audio_only, and combined formats
+        """
+        executable = shutil.which("yt-dlp")
+        if not executable:
+            raise FileNotFoundError("yt-dlp executable not found in PATH")
+            
+        if not check_network_connectivity() or not check_url_accessibility(url):
+            raise Exception("Network or URL accessibility issue")
+
+        cmd = [executable, "--dump-json", "--no-playlist"]
+        
+        # Handle temporary cookies file
+        temp_cookie_path = None
+        if cookies_content:
+            temp_cookie_path = os.path.join(self.cookies_dir, f".temp_format_{uuid.uuid4().hex}.txt")
+            with open(temp_cookie_path, "w") as f:
+                f.write(cookies_content)
+            cmd.extend(["--cookies", temp_cookie_path])
+            
+        cmd.append(url)
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                raise Exception(f"yt-dlp error: {result.stderr}")
+                
+            info = json.loads(result.stdout)
+            formats = info.get("formats", [])
+            
+            video_only = []
+            audio_only = []
+            combined = []
+            
+            duration = info.get("duration", 0)
+            
+            for f in formats:
+                format_id = f.get("format_id")
+                ext = f.get("ext", "unknown")
+                filesize = f.get("filesize") or f.get("filesize_approx")
+                
+                # If filesize is missing but we have tbr (total bitrate in kbps) and duration
+                if not filesize and f.get("tbr") and duration:
+                    # tbr is in kbps, duration is in seconds
+                    # bytes = (tbr * 1000 / 8) * duration
+                    filesize = (f.get("tbr") * 1000 / 8) * duration
+                
+                size_str = "Unknown size"
+                if filesize:
+                    if f.get("filesize") is None and f.get("filesize_approx") is None:
+                        size_str = f"~{filesize / (1024 * 1024):.1f} MB"
+                    elif f.get("filesize_approx"):
+                        size_str = f"~{filesize / (1024 * 1024):.1f} MB"
+                    else:
+                        size_str = f"{filesize / (1024 * 1024):.1f} MB"
+                
+                vcodec = f.get("vcodec", "none")
+                acodec = f.get("acodec", "none")
+                resolution = f.get("resolution", "unknown")
+                fps = f.get("fps", "")
+                
+                format_info = {
+                    "format_id": format_id,
+                    "ext": ext,
+                    "size": size_str,
+                    "note": f.get("format_note", "")
+                }
+                
+                if vcodec != "none" and acodec != "none":
+                    format_info["label"] = f"{resolution} {fps}fps - {ext} - {size_str} ({format_info['note']})"
+                    combined.append(format_info)
+                elif vcodec != "none":
+                    format_info["label"] = f"{resolution} {fps}fps - {ext} - {size_str} ({vcodec})"
+                    video_only.append(format_info)
+                elif acodec != "none":
+                    format_info["label"] = f"Audio: {acodec} - {f.get('abr', 'Unknown')}kbps - {ext} - {size_str}"
+                    audio_only.append(format_info)
+                    
+            return {
+                "title": info.get("title", "Unknown Video"),
+                "thumbnail": info.get("thumbnail"),
+                "formats": {
+                    "video_only": video_only[::-1], # Best first (usually)
+                    "audio_only": audio_only[::-1],
+                    "combined": combined[::-1]
+                }
+            }
+        finally:
+            if temp_cookie_path and os.path.exists(temp_cookie_path):
+                os.remove(temp_cookie_path)
 
     def _enqueue_output(self, stream: Any, queue: Queue[str]) -> None:
         """
@@ -556,6 +657,7 @@ class DownloadService:
         output_dir: str,
         cookies_content: Optional[str] = None,
         tool: str = "gallery-dl",
+        format_id: Optional[str] = None,
     ) -> None:
         """
         Background worker to handle the actual download with retry mechanism.
@@ -566,6 +668,7 @@ class DownloadService:
             output_dir (str): Directory to save downloaded files
             cookies_content (str, optional): Cookie content for authenticated downloads
             tool (str): Tool to use ('gallery-dl' or 'yt-dlp')
+            format_id (str, optional): Format ID for yt-dlp
         """
         cookie_file_path = None
         retry_count = 0
@@ -629,7 +732,10 @@ class DownloadService:
                     # Download best quality at 1080p or higher (matches CLI behavior)
                     # bv* = best video (any codec), ba = best audio
                     # This will download format 401+251 or similar high-quality formats
-                    cmd.extend(["-f", "bv*[height>=1080]+ba/b[height>=1080]/b"])
+                    if format_id:
+                        cmd.extend(["-f", format_id])
+                    else:
+                        cmd.extend(["-f", "bv*[height>=1080]+ba/b[height>=1080]/b"])
                     
                     # Force output to MP4 format instead of WebM
                     cmd.extend(["--merge-output-format", "mp4"])

@@ -615,6 +615,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Trigger tool change listener for initial state
+    const checkedTool = document.querySelector('input[name="downloadTool"]:checked');
+    if (checkedTool) {
+        checkedTool.dispatchEvent(new Event('change'));
+    }
+
     // Attach Clear Session Button Handler (Opens Modal)
     const clearSessionBtn = document.getElementById('clearSessionBtn');
     console.log("Clear Session Button Found:", !!clearSessionBtn);
@@ -759,4 +765,180 @@ function updateEngines() {
             btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Update';
             showToast('Network Error', 'Could not start engine update', 'error');
         });
+}
+
+// --- Advanced Formats Logic ---
+
+document.querySelectorAll('input[name="downloadTool"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        const fetchBtn = document.getElementById('fetchFormatsBtn');
+        if (e.target.value === 'yt-dlp') {
+            fetchBtn.classList.remove('d-none');
+        } else {
+            fetchBtn.classList.add('d-none');
+        }
+    });
+});
+
+function fetchFormats() {
+    const urlInput = document.getElementById('mediaUrl');
+    const cookieInput = document.getElementById('cookieFile');
+    const btn = document.getElementById('fetchFormatsBtn');
+    const btnText = btn.querySelector('.btn-text');
+    const spinner = btn.querySelector('.spinner-border');
+    
+    const url = urlInput.value.trim();
+    if (!url) {
+        showToast('Input Error', 'Please enter a valid URL', 'warning');
+        return;
+    }
+
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    btnText.textContent = 'Fetching...';
+
+    const sendRequest = (cookiesContent) => {
+        fetch('/api/formats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url, cookies: cookiesContent })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.data) {
+                populateFormatModal(data.data);
+            } else {
+                showToast('Error', data.message || 'Failed to fetch formats', 'error');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            showToast('Network Error', 'Could not fetch formats', 'error');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            spinner.classList.add('d-none');
+            btnText.innerHTML = '<i class="bi bi-list-columns-reverse me-2"></i>Advanced Formats';
+        });
+    };
+
+    if (cookieInput.files.length > 0) {
+        const reader = new FileReader();
+        reader.onload = (e) => sendRequest(e.target.result);
+        reader.readAsText(cookieInput.files[0]);
+    } else {
+        sendRequest(null);
+    }
+}
+
+function populateFormatModal(data) {
+    const modalEl = document.getElementById('formatSelectionModal');
+    const modal = new bootstrap.Modal(modalEl);
+    
+    document.getElementById('formatModalTitle').textContent = data.title;
+    const thumb = document.getElementById('formatModalThumb');
+    if (data.thumbnail) {
+        thumb.src = data.thumbnail;
+        thumb.classList.remove('d-none');
+    } else {
+        thumb.classList.add('d-none');
+    }
+    
+    // Populate Combined
+    const combinedSelect = document.getElementById('combinedFormatSelect');
+    combinedSelect.innerHTML = data.formats.combined.map(f => 
+        `<option value="${f.format_id}">${f.label}</option>`
+    ).join('') || '<option value="">No combined formats available</option>';
+    
+    // Populate Video
+    const videoSelect = document.getElementById('videoFormatSelect');
+    videoSelect.innerHTML = data.formats.video_only.map(f => 
+        `<option value="${f.format_id}">${f.label}</option>`
+    ).join('') || '<option value="">No video formats available</option>';
+    
+    // Populate Audio
+    const audioSelect = document.getElementById('audioFormatSelect');
+    audioSelect.innerHTML = data.formats.audio_only.map(f => 
+        `<option value="${f.format_id}">${f.label}</option>`
+    ).join('') || '<option value="">No audio formats available</option>';
+    
+    modal.show();
+}
+
+function startCustomDownload() {
+    // Determine active tab
+    const isCombined = document.getElementById('combined-tab').classList.contains('active');
+    
+    let formatId = '';
+    if (isCombined) {
+        formatId = document.getElementById('combinedFormatSelect').value;
+    } else {
+        const vid = document.getElementById('videoFormatSelect').value;
+        const aud = document.getElementById('audioFormatSelect').value;
+        if (vid && aud) {
+            formatId = `${vid}+${aud}`;
+        } else if (vid) {
+            formatId = vid;
+        } else if (aud) {
+            formatId = aud;
+        }
+    }
+    
+    if (!formatId) {
+        showToast('Error', 'Please select a format', 'warning');
+        return;
+    }
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('formatSelectionModal'));
+    modal.hide();
+    
+    // Call main startDownload logic but with custom format_id embedded
+    triggerDownloadWithFormat(formatId);
+}
+
+function triggerDownloadWithFormat(formatId) {
+    const urlInput = document.getElementById('mediaUrl');
+    const cookieInput = document.getElementById('cookieFile');
+    const tool = 'yt-dlp'; // Advanced formats is only yt-dlp
+    
+    const url = urlInput.value.trim();
+    
+    const sendRequest = (cookiesContent) => {
+        fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                url: url, 
+                cookies: cookiesContent,
+                tool: tool,
+                format_id: formatId
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                urlInput.value = '';
+                cookieInput.value = '';
+                showToast('Success', 'Custom download started', 'success');
+                if (statusFilter === 'completed' || statusFilter === 'error') {
+                   document.getElementById('filterAll').click();
+                }
+            } else {
+                showToast('Error', data.message || 'Failed to start download', 'error');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            showToast('Network Error', 'Could not connect to server', 'error');
+        });
+    };
+
+    if (cookieInput.files.length > 0) {
+        const reader = new FileReader();
+        reader.onload = (e) => sendRequest(e.target.result);
+        reader.readAsText(cookieInput.files[0]);
+    } else {
+        sendRequest(null);
+    }
 }

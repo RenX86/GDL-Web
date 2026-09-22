@@ -68,6 +68,7 @@ def start_download() -> Response:
     url = data.get("url")
     cookies_content = data.get("cookies")
     tool = data.get("tool", "gallery-dl")  # Default to gallery-dl
+    format_id = data.get("format_id") # Optional format selection
 
     # Get download service from registry
     download_service = cast(Any, current_app).service_registry.get("download_service")
@@ -78,7 +79,7 @@ def start_download() -> Response:
 
     # Start download using config from Flask app
     download_id = download_service.start_download(
-        url, cookies_content=cookies_content, tool=tool
+        url, cookies_content=cookies_content, tool=tool, format_id=format_id
     )
 
     return jsonify(
@@ -88,6 +89,25 @@ def start_download() -> Response:
             "message": "Download started successfully",
         }
     )
+
+@api_bp.route("/formats", methods=["POST"])
+@handle_api_errors
+@validate_required_fields(["url"])
+def get_formats() -> Response:
+    """Fetch available formats for yt-dlp"""
+    data = request.get_json()
+    url = data.get("url")
+    cookies_content = data.get("cookies")
+    
+    download_service = cast(Any, current_app).service_registry.get("download_service")
+    
+    # Fetch formats blocks and returns dict
+    result = download_service.fetch_formats(url, cookies_content=cookies_content)
+    
+    return jsonify({
+        "success": True,
+        "data": result
+    })
 
 
 @api_bp.route("/status/<download_id>", methods=["GET"])

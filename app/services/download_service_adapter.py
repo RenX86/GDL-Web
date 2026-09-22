@@ -106,6 +106,7 @@ class DownloadServiceAdapter:
         output_dir: Optional[str] = None,
         cookies_content: Optional[str] = None,
         tool: str = "gallery-dl",
+        format_id: Optional[str] = None,
     ) -> str:
         """
         Start a new download using the Download model.
@@ -116,6 +117,7 @@ class DownloadServiceAdapter:
             output_dir (str, optional): Directory to save downloaded files
             cookies_content (str, optional): Cookie content for authenticated downloads
             tool (str): Tool to use ('gallery-dl' or 'yt-dlp')
+            format_id (str, optional): Format ID to download for yt-dlp
 
         Returns:
             str: Unique download ID for tracking
@@ -140,7 +142,7 @@ class DownloadServiceAdapter:
         download_id = cast(
             str,
             self._service.start_download(
-                url, output_dir, cookies_content, session_id=session_id, tool=tool
+                url, output_dir, cookies_content, session_id=session_id, tool=tool, format_id=format_id
             ),
         )
 
@@ -157,6 +159,12 @@ class DownloadServiceAdapter:
         self._set_session_downloads(session_downloads)
 
         return download_id
+
+    def fetch_formats(self, url: str, cookies_content: Optional[str] = None) -> Any:
+        """Fetch formats for a URL via the underlying service"""
+        if not self.is_valid_url(url):
+            raise ValueError("Invalid URL format")
+        return self._service.fetch_formats(url, cookies_content)
 
     def get_download_status(self, download_id: str) -> Optional[Dict[str, Any]]:
         """
