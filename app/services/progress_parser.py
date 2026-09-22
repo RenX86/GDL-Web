@@ -155,7 +155,10 @@ def extract_downloaded_files_ytdlp(stdout_lines: List[str]) -> List[str]:
     deleted_files = set()
     
     for line in stdout_lines:
+        # Strip ANSI escape codes (yt-dlp sometimes outputs them even with --no-colors)
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
         line = line.strip()
+        
         # [download] Destination: ...
         if "[download] Destination:" in line:
             match = re.search(r'Destination:\s+(.*)$', line)
@@ -215,6 +218,7 @@ def extract_downloaded_files(stdout_lines: List[str]) -> List[str]:
     )
 
     for line in stdout_lines:
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
         line = line.strip()
         # Handle "Downloading x -> y" format if present
         if "Downloading" in line and " -> " in line:

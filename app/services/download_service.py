@@ -414,15 +414,18 @@ class DownloadService:
                                     end_time = datetime.fromisoformat(st["end_time"])
                                     if end_time.timestamp() < cutoff:
                                         self.logger.info(
-                                            f"Janitor: removing expired download {did}"
+                                            f"Janitor: removing expired download status {did} (files preserved on disk)"
                                         )
-                                        self.delete_download(did)
+                                        # Only remove in-memory status tracking, NOT files on disk.
+                                        # Files are only deleted when a user explicitly deletes a download
+                                        # or clears their session.
+                                        self.delete_download(did, delete_files=False)
                                 except ValueError:
                                     # Handle invalid date format
                                     self.logger.warning(
-                                        f"Invalid date format for download {did}, removing anyway"
+                                        f"Invalid date format for download {did}, removing status anyway"
                                     )
-                                    self.delete_download(did)
+                                    self.delete_download(did, delete_files=False)
                         except Exception as e:
                             self.logger.error(
                                 f"Error processing download {did} in janitor: {e}"
@@ -740,8 +743,8 @@ class DownloadService:
                     # Force output to MP4 format instead of WebM
                     cmd.extend(["--merge-output-format", "mp4"])
                     
-                    # Prevent downloading entire playlists
-                    cmd.append("--no-playlist")
+                    # Prevent downloading entire playlists and disable ANSI colors
+                    cmd.extend(["--no-playlist", "--no-colors"])
 
                     
                 else:
@@ -1023,6 +1026,8 @@ class DownloadService:
                         raw_files = extract_downloaded_files_ytdlp(stdout_lines)
                         files_list = []
                         for f in raw_files:
+                            # Strip quotes and whitespace that might have slipped through
+                            f = f.strip().strip('"').strip("'")
                             # 1. Normalize path
                             if not os.path.isabs(f):
                                 full_p = os.path.join(output_dir, f)
@@ -1418,35 +1423,23 @@ class DownloadService:
             # This catches cases where files list might be empty or incomplete
             if output_dir and os.path.exists(output_dir):
                 dirname = os.path.basename(output_dir)
-                # Only strictly delete 'user_' directories if they are empty
+                # Only delete 'user_' directories if they are empty
                 if dirname.startswith("user_"):
                     try:
-                        # Attempt to remove if empty
+                        # Attempt to remove ONLY if empty (os.rmdir fails on non-empty dirs)
                         if self._retry_fs_operation(os.rmdir, output_dir):
                             self.logger.info(
                                 f"Deleted empty session directory: {output_dir}"
                             )
-                        else:
-                             # Directory not empty, likely contains untracked files/folders
-                             # FALLBACK: If we are sure this is a user session dir, force remove it
-                             try:
-                                 self.logger.info(
-                                     f"Force removing remaining session directory: {output_dir}"
-                                 )
-                                 # Use rmtree as last resort to kill everything in the user dir
-                                 self._retry_fs_operation(shutil.rmtree, output_dir)
-                             except Exception as e:
-                                 self.logger.error(
-                                     f"Failed to force remove directory {output_dir}: {e}"
-                                 )
-
+                        # If not empty, leave it alone — other downloads may still use it
                     except OSError:
                          pass
 
-    def delete_download(self, download_id: str) -> bool:
+    def delete_download(self, download_id: str, delete_files: bool = True) -> bool:
         if download_id in self.active_processes:
             self.active_processes.pop(download_id).terminate()
-        self.delete_download_files(download_id)
+        if delete_files:
+            self.delete_download_files(download_id)
         self._pop_status(download_id)
 
         # Comprehensive cookie and config cleanup

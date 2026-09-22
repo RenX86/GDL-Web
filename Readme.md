@@ -1,4 +1,12 @@
-# Gallery-DL Web Interface (GDL-Web)
+# Gallery-DL Web App
+
+<div align="center">
+  <img src="assets/logo.jpg" alt="Gallery-DL Web Logo" width="200" style="border-radius: 20px;">
+</div>
+
+<p align="center">
+  <b>A simple, isolated, session-based web interface for downloading media using gallery-dl and yt-dlp.</b>
+</p>
 
 A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-dl) command-line tool that allows users to download media from various online platforms through an intuitive web interface. The application provides real-time download status tracking, session management, and secure cookie handling for authenticated downloads.
 

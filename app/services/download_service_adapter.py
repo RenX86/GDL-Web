@@ -125,17 +125,17 @@ class DownloadServiceAdapter:
         # Ensure session is initialized with user-specific directory
         self._ensure_session_initialized()
 
-        # Create user-specific download directory if it doesn't exist
-        if "user_download_dir" not in session:
-            base_download_dir = current_app.config.get("DOWNLOADS_DIR", "downloads")
-            user_dir = os.path.join(base_download_dir, f"user_{session['session_id']}")
-            os.makedirs(user_dir, exist_ok=True)
-            session["user_download_dir"] = user_dir
-            self.logger.info(f"Created user-specific download directory: {user_dir}")
+        # ALWAYS compute the download directory from the current server config.
+        # Never blindly reuse a path from the session cookie — it may be stale
+        # (e.g. a Windows path from a local run being sent to a Docker container).
+        base_download_dir = current_app.config.get("DOWNLOADS_DIR", "downloads")
+        user_dir = os.path.join(base_download_dir, f"user_{session['session_id']}")
+        os.makedirs(user_dir, exist_ok=True)
+        session["user_download_dir"] = user_dir
 
         # Use user-specific download directory if none provided
         if not output_dir:
-            output_dir = self._get_user_download_dir()
+            output_dir = user_dir
 
         # Start the download with the user-specific directory
         session_id = cast(Optional[str], session.get("session_id"))
