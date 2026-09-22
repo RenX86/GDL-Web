@@ -241,6 +241,34 @@ def get_app_config() -> Response:
     return jsonify({"success": True, "data": app_config.to_dict()})
 
 
+@api_bp.route("/system/engines", methods=["GET"])
+@handle_api_errors
+def get_engines_status() -> Response:
+    """Get current status and versions of backend engines."""
+    engine_manager = cast(Any, current_app).service_registry.get("engine_manager")
+    if not engine_manager:
+        raise ResourceNotFoundError("Engine manager service not available")
+        
+    return jsonify({"success": True, "data": engine_manager.get_status()})
+
+
+@api_bp.route("/system/engines/update", methods=["POST"])
+@handle_api_errors
+def update_engines() -> Response:
+    """Trigger an update for the backend engines."""
+    engine_manager = cast(Any, current_app).service_registry.get("engine_manager")
+    if not engine_manager:
+        raise ResourceNotFoundError("Engine manager service not available")
+        
+    result = engine_manager.trigger_update()
+    
+    # We return success regardless of the thread starting, because it returns its own success bool
+    return jsonify({
+        "success": result["success"], 
+        "message": result["message"]
+    })
+
+
 @api_bp.route("/files/<download_id>", methods=["GET"])
 @handle_api_errors
 def list_download_files(download_id: str) -> Response:

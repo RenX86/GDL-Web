@@ -132,7 +132,11 @@ def main():
                     '*.part',
                     '*.ytdl',
                     '*.json',
-                    '*__pycache__*'
+                    '*__pycache__*',
+                    '*venv*',
+                    '*.venv*',
+                    '*env*',
+                    '*site-packages*'
                 ]
             )
         except KeyboardInterrupt:

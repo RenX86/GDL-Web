@@ -41,6 +41,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     # Register services in the registry
     registry.register("download_service_raw", download_service)
+    
+    from .services.engine_manager import EngineManager
+    engine_manager = EngineManager()
+    registry.register("engine_manager", engine_manager)
 
     # Create and register adapter
     download_adapter = DownloadServiceAdapter(download_service)

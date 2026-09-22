@@ -693,4 +693,70 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Start SSE connection
     setupEventStream();
+    
+    // Fetch system engine versions
+    fetchSystemEngines();
 });
+
+// --- System Engine Status ---
+function fetchSystemEngines() {
+    fetch('/api/system/engines')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const status = data.data;
+                document.getElementById('galleryDlVersion').textContent = status.versions['gallery-dl'] || 'Unknown';
+                document.getElementById('ytDlpVersion').textContent = status.versions['yt-dlp'] || 'Unknown';
+                
+                const updateBtn = document.getElementById('updateEnginesBtn');
+                const updateStatus = document.getElementById('engineUpdateStatus');
+                
+                if (status.status === 'updating') {
+                    updateBtn.disabled = true;
+                    updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Updating...';
+                    updateStatus.classList.remove('d-none');
+                    
+                    // Poll again after 5 seconds if still updating
+                    setTimeout(fetchSystemEngines, 5000);
+                } else {
+                    updateBtn.disabled = false;
+                    updateBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Update';
+                    updateStatus.classList.add('d-none');
+                    
+                    if (status.status === 'error') {
+                        showToast('Engine Update Failed', status.error || 'Failed to update engines', 'error');
+                    } else if (updateBtn.dataset.wasUpdating === 'true') {
+                        showToast('Engines Updated', 'System engines successfully updated', 'success');
+                        updateBtn.dataset.wasUpdating = 'false';
+                    }
+                }
+            }
+        })
+        .catch(console.error);
+}
+
+function updateEngines() {
+    const btn = document.getElementById('updateEnginesBtn');
+    btn.disabled = true;
+    btn.dataset.wasUpdating = 'true';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Starting...';
+    
+    fetch('/api/system/engines/update', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showToast('Update Started', 'Engine update in progress...', 'info');
+                fetchSystemEngines(); // Starts polling
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Update';
+                showToast('Update Failed', data.message || 'Could not start update', 'error');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Update';
+            showToast('Network Error', 'Could not start engine update', 'error');
+        });
+}
