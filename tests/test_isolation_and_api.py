@@ -390,7 +390,10 @@ async def test_session_clear_deletes_data_rotates_cookie_and_invalidates_old_csr
 # ---- SPA Web Routes, /health, and /api/system/engines ----
 
 
-async def test_health_engines_and_spa_routes(client: httpx.AsyncClient) -> None:
+async def test_health_engines_and_spa_routes(
+    client: httpx.AsyncClient,
+    settings: Settings,
+) -> None:
     health = await client.get("/health")
     assert health.status_code == 200
     health_data = health.json()
@@ -409,7 +412,7 @@ async def test_health_engines_and_spa_routes(client: httpx.AsyncClient) -> None:
     spa_root = await client.get("/")
     assert spa_root.status_code == 200
     assert spa_root.headers["cache-control"] == "no-cache"
-    built_index = Path("frontend/dist/index.html")
+    built_index = settings.frontend_dist_dir / "index.html"
     assert built_index.is_file()
     assert spa_root.text == built_index.read_text(encoding="utf-8")
 

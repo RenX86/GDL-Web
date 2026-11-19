@@ -77,6 +77,9 @@ app.log
 node_modules/
 frontend/node_modules/
 frontend/dist/
+# Override global gitignore patterns (e.g. Python `lib/`) so frontend source is always tracked
+!frontend/src/lib/
+!frontend/src/lib/**
 
 # ========================
 # Testing, Coverage & Linters

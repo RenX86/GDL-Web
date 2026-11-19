@@ -45,14 +45,20 @@ async def bootstrap_session(
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    """Isolated testing settings using tmp_path storage and disabled rate limiting."""
+    """Isolated testing settings using tmp_path storage and a synthetic SPA dist."""
+    dist_dir = tmp_path / "frontend_dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        "<!doctype html><html><head><title>GDL-Web</title></head><body>OK</body></html>",
+        encoding="utf-8",
+    )
     return Settings(
         _env_file=None,
         app_env="testing",
         storage_dir=tmp_path / "storage",
         rate_limit_enabled=False,
         janitor_interval_seconds=3600,
-        frontend_dist_dir=Path("frontend/dist"),
+        frontend_dist_dir=dist_dir,
     )
 
 
