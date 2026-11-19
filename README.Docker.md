@@ -1,10 +1,10 @@
 # GDL-Web Docker Deployment Guide
 
-GDL-Web ships a unified, multi-stage Docker image built on `node:22-slim` (for compiling the Svelte 5 + Vite frontend) and `python:3.12-slim` (FastAPI + Uvicorn + SQLite WAL + `gallery-dl` + `yt-dlp` + `ffmpeg`). The same `Dockerfile` powers both local Docker Compose deployments and Render (`runtime: docker`).
+GDL-Web ships a unified, multi-stage Docker image built on `node:22-alpine` (for compiling the Svelte 5 + Vite frontend) and `python:3.12-alpine` (FastAPI + Uvicorn + SQLite WAL + `gallery-dl` + `yt-dlp` + `ffmpeg`). The same `Dockerfile` powers both local Docker Compose deployments and Render (`runtime: docker`).
 
 ## Container Architecture & Hardening
 
-- **Multi-stage build**: Node 22 compiles `frontend/` into static assets (`frontend/dist`); the final runtime image contains only Python 3.12 slim, `ffmpeg`, manylinux Python wheels, application code, and compiled static assets.
+- **Multi-stage build**: Node 22 Alpine compiles `frontend/` into static assets (`frontend/dist`), a Python 3.12 Alpine builder creates a stripped `/opt/venv`, and the final runtime image contains only Python 3.12 Alpine, lightweight Alpine `ffmpeg`, `/opt/venv`, application code, and compiled static assets.
 - **Non-root execution**: Runs as `appuser` (UID `10001`). Application code (`app/`, `run.py`, `frontend/dist/`) is owned by `root:root` and read-only to the app process.
 - **Single unified volume**: All persistent runtime state lives under `/app/storage`:
   - `/app/storage/downloads` — per-session downloaded media

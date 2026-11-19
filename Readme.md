@@ -18,7 +18,7 @@
 - **Persistent Multi-User State**: SQLite in WAL mode (`aiosqlite`) tracks downloads, sessions, and TTL expiration without in-memory state loss.
 - **Constant-Memory Streaming ZIPs**: Download entire galleries as ZIP archives streamed directly from disk via `zipstream-ng`.
 - **Encrypted Cookie Authentication**: Upload Netscape-format cookies for authenticated downloads; encrypted at rest with fail-fast Fernet (`cryptography`) and materialized transiently with `0700` permissions.
-- **Unified Production Container**: Multi-stage Docker build (Node 22 + Python 3.12 slim + `ffmpeg`) used identically for local Docker Compose and Render (`runtime: docker`).
+- **Unified Production Container**: Multi-stage Docker build (`node:22-alpine` + `python:3.12-alpine` + `ffmpeg`) used identically for local Docker Compose and Render (`runtime: docker`).
 
 ## Gallery
 
@@ -164,7 +164,7 @@ cp .env.example .env
 Start the FastAPI backend with Uvicorn:
 
 ```bash
-uvicorn app.main:app --host 127.0.0.1 --port 6969 --reload
+uvicorn --factory app.main:create_app --host 127.0.0.1 --port 6969 --reload
 # or
 python run.py
 ```
