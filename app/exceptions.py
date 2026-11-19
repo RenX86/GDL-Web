@@ -1,72 +1,58 @@
-"""
-Custom Exceptions Module
+"""Domain exceptions for GDL-Web."""
 
-This module defines custom exceptions for better error handling throughout the application.
-"""
-
-from typing import Optional
+from __future__ import annotations
 
 
-class AppError(Exception):
-    """Base exception class for all application errors"""
+class GDLWebError(Exception):
+    """Base application exception."""
 
-    status_code = 500
-
-    def __init__(
-        self,
-        message: str = "An unexpected error occurred",
-        status_code: Optional[int] = None,
-    ) -> None:
+    def __init__(self, message: str, status_code: int = 500) -> None:
+        super().__init__(message)
         self.message = message
-        if status_code is not None:
-            self.status_code = status_code
-        super().__init__(self.message)
-
-    def to_dict(self) -> dict:
-        """Convert exception to dictionary for JSON response"""
-        return {"success": False, "error": self.message}
+        self.status_code = status_code
 
 
-class ResourceNotFoundError(AppError):
-    """Exception raised when a requested resource is not found"""
-
-    status_code = 404
-
-    def __init__(self, message: str = "Resource not found") -> None:
-        super().__init__(message, self.status_code)
+class URLValidationError(ValueError):
+    """Raised when a user-supplied URL fails validation or SSRF checks."""
 
 
-class ValidationError(AppError):
-    """Exception raised when input validation fails"""
+class CookieCryptoError(GDLWebError):
+    """Raised when cookie encryption or decryption fails."""
 
-    status_code = 400
-
-    def __init__(self, message: str = "Invalid input data") -> None:
-        super().__init__(message, self.status_code)
+    def __init__(self, message: str = "Cookie encryption error") -> None:
+        super().__init__(message, status_code=500)
 
 
-class PermissionError(AppError):
-    """Exception raised when permission is denied for an operation"""
+class PathSecurityError(GDLWebError, ValueError):
+    """Raised when a path fails traversal or symlink security checks."""
 
-    status_code = 403
-
-    def __init__(self, message: str = "Permission denied") -> None:
-        super().__init__(message, self.status_code)
+    def __init__(self, message: str = "Invalid path") -> None:
+        super().__init__(message, status_code=400)
 
 
-class DownloadError(AppError):
-    """Exception raised when a download operation fails"""
+class DownloadNotFoundError(GDLWebError):
+    """Raised when a download does not exist or is not owned by the session."""
 
-    status_code = 500
-
-    def __init__(self, message: str = "Download operation failed") -> None:
-        super().__init__(message, self.status_code)
+    def __init__(self, message: str = "Download not found") -> None:
+        super().__init__(message, status_code=404)
 
 
-class NetworkError(AppError):
-    """Exception raised when a network operation fails"""
+class DownloadConflictError(GDLWebError):
+    """Raised when an operation conflicts with the download's current state."""
 
-    status_code = 503
+    def __init__(self, message: str = "Download is already in a terminal state") -> None:
+        super().__init__(message, status_code=409)
 
-    def __init__(self, message: str = "Network operation failed") -> None:
-        super().__init__(message, self.status_code)
+
+class QuotaExceededError(GDLWebError):
+    """Raised when a session or global resource quota is exceeded."""
+
+    def __init__(self, message: str = "Storage or concurrency quota exceeded") -> None:
+        super().__init__(message, status_code=429)
+
+
+class EngineUpdateDisabledError(GDLWebError):
+    """Raised when runtime engine updates are disabled or unauthorized."""
+
+    def __init__(self, message: str = "Runtime engine updates are disabled") -> None:
+        super().__init__(message, status_code=403)

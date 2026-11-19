@@ -1,175 +1,136 @@
-"""
-Unit tests for configuration classes
+"""Unit tests for pydantic-settings configuration validation and secret provisioning."""
 
-Tests the configuration system in app/config.py including:
-- Configuration class initialization
-- Environment-specific configs (Development, Production, Testing)
-- Configuration selection and defaults
-- Windows path handling
-"""
+from __future__ import annotations
+
+import secrets
+from pathlib import Path
 
 import pytest
-import os
-import tempfile
-from app.config import (
-    Config,
-    DevelopmentConfig,
-    ProductionConfig,
-    TestingConfig,
-    get_config,
-)
-from flask import Flask
+from cryptography.fernet import Fernet
+
+from app.config import Settings
+
+pytestmark = pytest.mark.unit
 
 
-class TestConfigClasses:
-    """Test configuration classes"""
-    
-    def test_development_config_defaults(self):
-        """Test development configuration defaults"""
-        assert DevelopmentConfig.DEBUG is True
-        assert DevelopmentConfig.TESTING is False
-        assert DevelopmentConfig.LOG_LEVEL == os.environ.get("LOG_LEVEL", "DEBUG")
-    
-    def test_production_config_security(self):
-        """Test production configuration security settings"""
-        assert ProductionConfig.DEBUG is False
-        assert ProductionConfig.TESTING is False
-        assert ProductionConfig.LOG_LEVEL == os.environ.get("LOG_LEVEL", "WARNING")
-        
-        # Check security headers are defined
-        assert hasattr(ProductionConfig, 'SECURITY_HEADERS')
-        assert 'X-Content-Type-Options' in ProductionConfig.SECURITY_HEADERS
-        assert 'X-Frame-Options' in ProductionConfig.SECURITY_HEADERS
-    
-    def test_testing_config_isolation(self):
-        """Test testing configuration isolation"""
-        assert TestingConfig.TESTING is True
-        assert TestingConfig.DEBUG is True
-        
-        # Testing should use separate downloads directory
-        assert 'test_downloads' in TestingConfig.DOWNLOADS_DIR
-    
-    def test_get_config_by_name(self):
-        """Test getting configuration by name"""
-        dev_config = get_config('development')
-        assert dev_config == DevelopmentConfig
-        
-        prod_config = get_config('production')
-        assert prod_config == ProductionConfig
-        
-        test_config = get_config('testing')
-        assert test_config == TestingConfig
-    
-    def test_config_environment_detection(self):
-        """Test configuration environment detection"""
-        # Save original env
-        original_env = os.environ.get('FLASK_ENV')
-        
-        try:
-            # Test development default
-            os.environ.pop('FLASK_ENV', None)
-            config = get_config()
-            assert config == DevelopmentConfig
-            
-            # Test explicit production
-            os.environ['FLASK_ENV'] = 'production'
-            config = get_config()
-            assert config == ProductionConfig
-        finally:
-            # Restore original env
-            if original_env:
-                os.environ['FLASK_ENV'] = original_env
-            else:
-                os.environ.pop('FLASK_ENV', None)
-    
-    def test_windows_path_handling(self):
-        """Test Windows path handling in configuration"""
-        # Save original env
-        original_downloads = os.environ.get('DOWNLOADS_DIR')
-        
-        try:
-            if os.name == 'nt':
-                # Test that Linux paths are ignored on Windows
-                os.environ['DOWNLOADS_DIR'] = '/app/downloads'
-                
-                # Create a new config instance
-                config = Config()
-                
-                # Should not use the Linux path
-                assert not config.DOWNLOADS_DIR.startswith('/')
-                assert os.path.isabs(config.DOWNLOADS_DIR)
-        finally:
-            # Restore original env
-            if original_downloads:
-                os.environ['DOWNLOADS_DIR'] = original_downloads
-            else:
-                os.environ.pop('DOWNLOADS_DIR', None)
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure ambient shell environment variables never leak into config tests."""
+    for var in (
+        "APP_ENV",
+        "SECRET_KEY",
+        "COOKIES_ENCRYPTION_KEY",
+        "STORAGE_DIR",
+        "ENABLE_RUNTIME_UPDATES",
+        "RATE_LIMIT_ENABLED",
+    ):
+        monkeypatch.delenv(var, raising=False)
 
 
-class TestConfigInitialization:
-    """Test configuration initialization"""
-    
-    def test_config_init_app(self):
-        """Test config initialization with Flask app"""
-        app = Flask(__name__)
-        
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Override directories for testing
-            DevelopmentConfig.DOWNLOADS_DIR = os.path.join(temp_dir, 'downloads')
-            DevelopmentConfig.COOKIES_DIR = os.path.join(temp_dir, 'cookies')
-            
-            DevelopmentConfig.init_app(app)
-            
-            # Check that config was applied
-            assert app.config['SECRET_KEY'] is not None
-            assert app.config['DOWNLOADS_DIR'] == DevelopmentConfig.DOWNLOADS_DIR
-            assert app.config['DEBUG'] == DevelopmentConfig.DEBUG
-    
-    def test_config_creates_directories(self):
-        """Test that config initialization creates necessary directories"""
-        app = Flask(__name__)
-        
-        with tempfile.TemporaryDirectory() as temp_dir:
-            downloads_dir = os.path.join(temp_dir, 'downloads')
-            cookies_dir = os.path.join(temp_dir, 'cookies')
-            
-            # Override directories
-            DevelopmentConfig.DOWNLOADS_DIR = downloads_dir
-            DevelopmentConfig.COOKIES_DIR = cookies_dir
-            
-            # Directories should not exist yet
-            assert not os.path.exists(downloads_dir)
-            assert not os.path.exists(cookies_dir)
-            
-            # Initialize app
-            DevelopmentConfig.init_app(app)
-            
-            # Directories should now exist
-            assert os.path.exists(downloads_dir)
-            assert os.path.exists(cookies_dir)
-    
-    def test_config_missing_encryption_key_production(self):
-        """Test that production config requires encryption key"""
-        # Save original env
-        original_key = os.environ.get('COOKIES_ENCRYPTION_KEY')
-        
-        try:
-            # Remove encryption key
-            os.environ.pop('COOKIES_ENCRYPTION_KEY', None)
-            
-            # Set to production
-            os.environ['FLASK_ENV'] = 'production'
-            
-            # Should raise error for missing key in production
-            with pytest.raises(RuntimeError, match="COOKIES_ENCRYPTION_KEY"):
-                # Try to access the key
-                _ = ProductionConfig.COOKIES_ENCRYPTION_KEY
-        finally:
-            # Restore original env
-            if original_key:
-                os.environ['COOKIES_ENCRYPTION_KEY'] = original_key
-            os.environ.pop('FLASK_ENV', None)
+def test_blank_app_env_normalizes_to_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """APP_ENV='' or whitespace must normalize to production and never enable debug."""
+    valid_secret = secrets.token_hex(32)
+    valid_fernet = Fernet.generate_key().decode("utf-8")
+
+    settings_direct = Settings(
+        _env_file=None,
+        app_env="",  # type: ignore[arg-type]
+        secret_key=valid_secret,
+        cookies_encryption_key=valid_fernet,
+    )
+    assert settings_direct.app_env == "production"
+    assert settings_direct.is_production is True
+
+    monkeypatch.setenv("APP_ENV", "   ")
+    monkeypatch.setenv("SECRET_KEY", valid_secret)
+    monkeypatch.setenv("COOKIES_ENCRYPTION_KEY", valid_fernet)
+    settings_env = Settings(_env_file=None)
+    assert settings_env.app_env == "production"
+    assert settings_env.is_production is True
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_production_fails_fast_when_secret_key_missing_or_short() -> None:
+    """Production mode must fail fast with ValueError if SECRET_KEY is missing or < 32 chars."""
+    valid_fernet = Fernet.generate_key().decode("utf-8")
+
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            secret_key="",
+            cookies_encryption_key=valid_fernet,
+        )
+
+    with pytest.raises(ValueError, match="SECRET_KEY"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            secret_key="too-short-secret-key",
+            cookies_encryption_key=valid_fernet,
+        )
+
+
+def test_production_fails_fast_when_cookies_encryption_key_missing_or_invalid() -> None:
+    """Production mode must reject missing or non-Fernet COOKIES_ENCRYPTION_KEY values."""
+    valid_secret = secrets.token_hex(32)
+
+    with pytest.raises(ValueError, match="COOKIES_ENCRYPTION_KEY"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            secret_key=valid_secret,
+            cookies_encryption_key="",
+        )
+
+    # Raw hex string is NOT a valid URL-safe base64 32-byte Fernet key.
+    with pytest.raises(ValueError, match="Fernet"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            secret_key=valid_secret,
+            cookies_encryption_key=secrets.token_hex(32),
+        )
+
+
+@pytest.mark.parametrize("env_name", ["development", "testing"])
+def test_non_production_auto_generates_strong_secrets(env_name: str) -> None:
+    """Development and testing modes auto-provision strong secret_key and valid Fernet key."""
+    settings = Settings(
+        _env_file=None,
+        app_env=env_name,  # type: ignore[arg-type]
+    )
+    assert settings.is_production is False
+    assert len(settings.secret_key) >= 32
+
+    fernet = Fernet(settings.cookies_encryption_key.encode("utf-8"))
+    token = fernet.encrypt(b"cookie-data")
+    assert fernet.decrypt(token) == b"cookie-data"
+
+
+def test_non_production_still_rejects_explicit_invalid_fernet_key() -> None:
+    """Even in dev/testing, an explicitly configured invalid Fernet key must raise ValueError."""
+    with pytest.raises(ValueError, match="Fernet"):
+        Settings(
+            _env_file=None,
+            app_env="testing",
+            cookies_encryption_key=secrets.token_hex(32),
+        )
+
+
+def test_storage_dir_derives_subpaths_and_creates_directories(tmp_path: Path) -> None:
+    """storage_dir cleanly derives db_path, downloads_dir, and cookies_dir."""
+    root = tmp_path / "custom_storage"
+    settings = Settings(
+        _env_file=None,
+        app_env="testing",
+        storage_dir=root,
+    )
+
+    assert settings.db_path == root / "db" / "gdl.db"
+    assert settings.downloads_dir == root / "downloads"
+    assert settings.cookies_dir == root / "tmp_cookies"
+
+    settings.ensure_storage_dirs()
+    assert settings.db_path.parent.is_dir()
+    assert settings.downloads_dir.is_dir()
+    assert settings.cookies_dir.is_dir()

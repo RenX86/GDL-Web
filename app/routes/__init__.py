@@ -1,12 +1,6 @@
-"""
-Routes Package
+"""Route factory exports."""
 
-This package contains all route definitions for the application,
-organized into separate modules for better maintainability.
-"""
+from .api import build_api_router
+from .web import build_web_router
 
-from .api import api_bp
-from .web import main_bp
-
-# Export blueprints
-__all__ = ["api_bp", "main_bp"]
+__all__ = ["build_api_router", "build_web_router"]

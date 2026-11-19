@@ -1,69 +1,32 @@
-"""
-Centralized logging configuration for the Flask application.
+"""Container-friendly structured logging configuration."""
 
-This module provides a single source of truth for logging setup,
-eliminating duplication between run.py and config classes.
-"""
+from __future__ import annotations
 
-import os
-import sys
 import logging
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import Optional
+import sys
 
 
-def setup_logging(log_level: str = "INFO", log_file: str = "app.log") -> logging.Logger:
-    """
-    Configure logging for the application.
-
-    Args:
-        log_level (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file (str): Path to the log file
-    """
-    # Convert string level to logging constant
+def setup_logging(log_level: str = "INFO") -> None:
+    """Configure root logging to stdout without multi-process file lock contention."""
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
 
-    # Ensure log directory exists
-    log_path = Path(log_file)
-    log_path.parent.mkdir(exist_ok=True)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
 
-    # Configure logging
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            RotatingFileHandler(
-                log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
-            ),
-        ],
-        force=True,  # Ensure our configuration overrides any existing handlers/levels
+    # Clear existing handlers to avoid duplicate output on reload/test setup.
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(numeric_level)
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
 
-    # Set specific logger levels for third-party libraries
-    env = os.environ.get("FLASK_ENV", "development")
-    if env == "development":
-        # Show request logs during development
-        logging.getLogger("werkzeug").setLevel(logging.INFO)
-        logging.getLogger("flask.app").setLevel(numeric_level)
-    else:
-        # Keep noisy libraries quieter in production
-        logging.getLogger("werkzeug").setLevel(logging.WARNING)
-        logging.getLogger("flask.app").setLevel(logging.WARNING)
+    # Keep noisy third-party loggers reasonable.
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-    return logging.getLogger(__name__)
-
-
-def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """
-    Get a logger instance with the specified name.
-
-    Args:
-        name (str): Logger name (defaults to calling module)
-
-    Returns:
-        logging.Logger: Configured logger instance
-    """
-    return logging.getLogger(name or __name__)
+    logging.getLogger("uvicorn.access").setLevel(numeric_level)

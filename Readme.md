@@ -1,30 +1,26 @@
-# Gallery-DL Web App
+# GDL-Web
 
 <div align="center">
-  <img src="assets/logo.jpg" alt="Gallery-DL Web Logo" width="200" style="border-radius: 20px;">
+  <img src="assets/logo.jpg" alt="GDL-Web Logo" width="200" style="border-radius: 20px;">
 </div>
 
 <p align="center">
-  <b>A simple, isolated, session-based web interface for downloading media using gallery-dl and yt-dlp.</b>
+  <b>A modern, security-hardened, multi-user web interface for downloading galleries, videos, and media using <code>gallery-dl</code>, <code>yt-dlp</code>, and <code>ffmpeg</code>.</b>
 </p>
-
-A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-dl) command-line tool that allows users to download media from various online platforms through an intuitive web interface. The application provides real-time download status tracking, session management, and secure cookie handling for authenticated downloads.
 
 ![GDL-Web Interface](assets/Image1.png)
 
-## 🌟 Features
+## Features
 
-- **Web-based Interface**: User-friendly web interface for gallery-dl with responsive design
-- **Real-time Status Tracking**: Live progress updates for all active downloads
-- **Session Management**: Isolated download sessions per user with automatic cleanup
-- **Cookie Support**: Secure handling of authentication cookies for private content
-- **File Management**: Browse and download completed media files
-- **Filtering**: Filter downloads by status (in-progress, completed, failed)
-- **Retry Logic**: Automatic retry mechanism for failed downloads due to network issues
-- **Security**: Secure cookie encryption, path traversal protection, and input validation
-- **Multi-user Support**: Session-based isolation to support multiple concurrent users
+- **Dual Download Engines**: Seamlessly download image galleries with [gallery-dl](https://github.com/mikf/gallery-dl) and videos/audio (with format inspection and `ffmpeg` remuxing) with [yt-dlp](https://github.com/yt-dlp/yt-dlp).
+- **Modern Reactive UI**: Built with Svelte 5, TypeScript, and Vite for fast, accessible desktop and mobile workflows.
+- **Real-Time Progress via Session-Scoped SSE**: Live download progress and status updates streamed over `/api/events`, strictly isolated per user session.
+- **Persistent Multi-User State**: SQLite in WAL mode (`aiosqlite`) tracks downloads, sessions, and TTL expiration without in-memory state loss.
+- **Constant-Memory Streaming ZIPs**: Download entire galleries as ZIP archives streamed directly from disk via `zipstream-ng`.
+- **Encrypted Cookie Authentication**: Upload Netscape-format cookies for authenticated downloads; encrypted at rest with fail-fast Fernet (`cryptography`) and materialized transiently with `0700` permissions.
+- **Unified Production Container**: Multi-stage Docker build (Node 22 + Python 3.12 slim + `ffmpeg`) used identically for local Docker Compose and Render (`runtime: docker`).
 
-## 📸 Gallery
+## Gallery
 
 | Dashboard | Download Progress |
 |:---:|:---:|
@@ -32,275 +28,181 @@ A web-based user interface for the [gallery-dl](https://github.com/mikf/gallery-
 | **File Inline View** | **Video Preview** |
 | ![File-view](assets/Image5.png) | ![Video-Preview](assets/Image6.png) |
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-- **Backend**: Python Flask web framework
-- **Frontend**: HTML5, CSS3, JavaScript (no external dependencies)
-- **Download Engine**: [gallery-dl](https://github.com/mikf/gallery-dl) - a command-line program to download image-galleries from several image hosting sites
-- **Task Management**: Threading for concurrent download operations
-- **File Serving**: Secure file serving with path traversal prevention
-- **Data Storage**: In-memory storage for download status (with automatic cleanup)
+- **Backend**: FastAPI + Uvicorn (single async worker, `--proxy-headers`)
+- **Database**: SQLite (WAL mode) via `aiosqlite`
+- **Frontend**: Svelte 5 + TypeScript + Vite (`frontend/`)
+- **Download Engines**: `gallery-dl`, `yt-dlp`, `ffmpeg`
+- **Streaming Archives**: `zipstream-ng`
+- **Security & Validation**: `pydantic` / `pydantic-settings`, `cryptography` (Fernet), `slowapi`
+- **Quality & Testing**: `ruff`, `mypy`, `pytest` (`pytest-asyncio`, `pytest-cov`, `httpx`), `svelte-check`, `vitest`
 
-## 📋 Prerequisites
+## Quick Start with Docker Compose (Recommended)
 
-- Python 3.7+
-- Node.js/npm (for development scripts)
-- [gallery-dl](https://github.com/mikf/gallery-dl) - install with `pip install gallery-dl`
+### 1. Prepare environment variables
 
-## 🐳 Docker Deployment (Recommended)
-
-The easiest way to run GDL-Web is using Docker. You can pull the pre-built image from Docker Hub.
-
-### 1. Run with Docker Compose (Easiest)
-
-Create a `compose.yaml` file:
-
-```yaml
-services:
-  server:
-    image: renx86/gdl-web:latest
-    ports:
-      - "6969:6969"
-    volumes:
-      - downloads:/app/downloads
-      - cookies:/app/secure_cookies
-    environment:
-      - SECRET_KEY=your_secure_random_key
-      - COOKIES_ENCRYPTION_KEY=your_fernet_key
-    restart: always
-
-volumes:
-  downloads:
-  cookies:
+```bash
+cp .env.example .env
 ```
 
-Run the application:
+Generate strong production secrets and place them in `.env`:
+
+```bash
+python -c "import secrets; print('SECRET_KEY=' + secrets.token_hex(32))"
+python -c "from cryptography.fernet import Fernet; print('COOKIES_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+```
+
+### 2. Start the container
 
 ```bash
 docker compose up -d
 ```
 
-Access the interface at `http://localhost:6969`.
+On Windows PowerShell, you can also use the included helper script:
 
-### 2. Run with Docker CLI
+```powershell
+.\gdl-web.ps1 up
+.\gdl-web.ps1 logs
+.\gdl-web.ps1 status
+.\gdl-web.ps1 down
+```
+
+Open `http://127.0.0.1:6969` in your browser. For full container hardening details and standalone `docker run` instructions, see [README.Docker.md](README.Docker.md).
+
+## Deploying to Render
+
+GDL-Web includes a ready-to-use `render.yaml` Blueprint using `runtime: docker` so the compiled Svelte 5 frontend, Python 3.12 runtime, and `ffmpeg` run identically to local Docker:
+
+1. Connect the repository in the Render dashboard as a Blueprint (or Web Service using Docker).
+2. `render.yaml` automatically configures:
+   - Health check at `/health`
+   - A single persistent disk (`gdl-storage`, 10 GB) mounted at `/app/storage` (holding `downloads/`, `db/`, and `tmp_cookies/`)
+   - Auto-generated `SECRET_KEY` and multi-user concurrency/TTL defaults (`MAX_CONCURRENT_DOWNLOADS_GLOBAL=6`, `MAX_CONCURRENT_DOWNLOADS_PER_SESSION=2`, `MAX_FILESIZE_MB=500`, `DOWNLOAD_TTL_SECONDS=3600`)
+   - `ENABLE_RUNTIME_UPDATES=false`
+3. Set `COOKIES_ENCRYPTION_KEY` in Render's Environment dashboard using a valid Fernet key generated with:
+
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+## Security Architecture
+
+GDL-Web is engineered for multi-user deployment with defense-in-depth controls:
+
+- **Session-Scoped SSE & Storage Isolation**: Every browser session receives a signed session cookie; download history, files, and `/api/events` SSE streams are strictly scoped to the owning session.
+- **SSRF Guard**: Submitted URLs are validated before spawning downloaders, blocking non-HTTP(S) schemes and private, loopback, link-local, multicast, and cloud metadata IP ranges.
+- **Fail-Fast Fernet Cookie Encryption**: In production (`APP_ENV=production`), startup fails immediately if `SECRET_KEY` or a valid Fernet `COOKIES_ENCRYPTION_KEY` is missing or malformed. Decrypted cookies are written only for the duration of a subprocess inside a `chmod 700` directory and cleaned up immediately.
+- **CSRF Protection**: State-changing API requests are protected against cross-site request forgery via `SameSite` cookies and CSRF/Origin verification.
+- **Strict CSP & Security Headers**: Responses include a Content-Security-Policy (no inline script execution), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy`.
+- **Path Traversal Prevention & Streaming ZIPs**: All file reads/previews validate canonical paths inside the session's download root, and ZIP exports stream on the fly via `zipstream-ng`.
+- **Rate Limiting & Quotas**: `slowapi` rate limits protect write/inspection endpoints, while global and per-session concurrency limits, `MAX_FILESIZE_MB`, and `DOWNLOAD_TTL_SECONDS` bound disk and CPU usage.
+- **Container Hardening**: Runs as non-root `appuser` (UID `10001`) with application code owned by `root:root`. `compose.yaml` binds to `127.0.0.1`, enables `read_only: true`, drops all Linux capabilities (`cap_drop: [ALL]`), enforces `no-new-privileges:true`, caps `pids_limit: 256`, and leaves `ENABLE_RUNTIME_UPDATES=false` by default.
+
+## Configuration
+
+See [`.env.example`](.env.example) for all supported environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `APP_ENV` | `development` | `development`, `production`, or `testing` |
+| `HOST` | `127.0.0.1` | Server bind address |
+| `PORT` | `6969` | Listening HTTP port |
+| `STORAGE_DIR` | `storage` (`/app/storage` in Docker) | Unified root for `downloads/`, `db/`, and `tmp_cookies/` |
+| `SECRET_KEY` | *(required in prod)* | Secret key for signing sessions |
+| `COOKIES_ENCRYPTION_KEY` | *(required in prod)* | 32-byte url-safe base64 Fernet key for encrypting cookies |
+| `ENABLE_RUNTIME_UPDATES` | `false` | Enables/disables runtime engine updates via API |
+| `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `MAX_CONCURRENT_DOWNLOADS_GLOBAL` | `6` | Maximum concurrent downloads across all sessions |
+| `MAX_CONCURRENT_DOWNLOADS_PER_SESSION` | `2` | Maximum concurrent downloads per session |
+| `MAX_FILESIZE_MB` | `500` | Maximum individual media file size limit (MB) |
+| `DOWNLOAD_TTL_SECONDS` | `3600` | Retention window before expired downloads are purged |
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/health` | Health check probe for Docker and Render |
+| `GET` | `/api/events` | Session-scoped Server-Sent Events (SSE) progress stream |
+| `POST` | `/api/download` | Start a new download (`url`, `tool`, optional `format_id` & `cookies`) |
+| `POST` | `/api/formats` | Inspect available `yt-dlp` formats for a URL |
+| `GET` | `/api/downloads` | List all downloads belonging to the current session |
+| `GET` | `/api/status/{download_id}` | Fetch detailed status and progress of a session download |
+| `DELETE` | `/api/downloads/{download_id}` | Delete a download record and its files |
+| `POST` | `/api/cancel/{download_id}` | Cancel an active download subprocess |
+| `POST` | `/api/clear-history` | Clear finished/failed download history for the current session |
+| `POST` | `/api/session/clear` | Wipe all downloads and stored cookies for the current session |
+| `GET` | `/api/files/{download_id}` | List downloaded media files for a job |
+| `GET` | `/api/download-file/{download_id}/{filename}` | Stream or preview a single downloaded file |
+| `GET` | `/api/download-zip/{download_id}` | Stream all files in a job as a ZIP archive (`zipstream-ng`) |
+| `GET` | `/api/stats` | Get session download statistics |
+| `GET` | `/api/config` | Get public runtime configuration and limits |
+| `GET` | `/api/system/engines` | Report installed `gallery-dl`, `yt-dlp`, and `ffmpeg` versions |
+| `POST` | `/api/system/engines/update` | Update download engines (only when `ENABLE_RUNTIME_UPDATES=true`) |
+
+## Local Development
+
+### Prerequisites
+
+- Python 3.12+
+- Node.js 22+ and npm
+- `ffmpeg` on `PATH` (for video/audio merging via `yt-dlp`)
+
+### 1. Backend Setup
 
 ```bash
-docker run -d \
-  -p 6969:6969 \
-  -v gdl_downloads:/app/downloads \
-  -v gdl_cookies:/app/secure_cookies \
-  -e SECRET_KEY=your_secure_random_key \
-  -e COOKIES_ENCRYPTION_KEY=your_fernet_key \
-  --name gdl-web \
-  renx86/gdl-web:latest
+python -m venv .venv
+# Linux/macOS:
+source .venv/bin/activate
+# Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
+
+pip install -r requirements-dev.txt
+cp .env.example .env
 ```
 
-## 🚀 Manual Installation
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/RenX86/GDL-Web.git
-   cd GDL-Web
-   ```
-
-2. **Create a virtual environment:**
-
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install Python dependencies:**
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Install gallery-dl (if not already installed):**
-
-   ```bash
-   pip install gallery-dl
-   ```
-
-5. **Set up environment variables:**
-
-   ```bash
-   cp .env.example .env
-   # Edit .env to add your secret keys and configuration
-   ```
-
-6. **Run the application:**
-
-   ```bash
-   python run.py
-   ```
-
-7. **Open your browser and navigate to:** `http://127.0.0.1:5000`
-
-## 🚀 Running in Production
-
-The application is configured for deployment to Render.com:
-
-1. **Using Gunicorn:**
-
-   ```bash
-   gunicorn --bind 0.0.0.0:$PORT run:app
-   ```
-
-2. **Environment Variables Required for Production:**
-   - `FLASK_ENV`: Set to `production`
-   - `SECRET_KEY`: Secure random key for Flask sessions
-   - `COOKIES_ENCRYPTION_KEY`: Secure random key for cookie encryption
-   - `HOST`: 0.0.0.0 (for Render deployment)
-   - Other optional variables as defined in `render.yaml`
-
-## 📖 Usage
-
-### Basic Download
-
-1. Enter the URL of the gallery or media you want to download
-2. Optionally upload a cookie file for authenticated content
-3. Click "Download Media"
-4. Monitor progress in real-time
-
-### Cookie Support
-
-For platforms requiring authentication:
-
-1. Extract cookies from your browser (using extensions like "Export Cookies" or "Cookie Editor")
-2. Save as a Netscape-format text file
-3. Upload the cookie file during download
-4. Cookies are encrypted and stored securely
-
-### Managing Downloads
-
-- Filter downloads by status (All, In Progress, Completed, Failed)
-- Delete individual downloads or clear all history
-- View and download completed files
-- Auto-refresh every 2 seconds for live status updates
-
-## 🏗️ Architecture
-
-The application follows a service-oriented architecture with the following components:
-
-### Backend Structure
-
-```
-app/
-├── __init__.py          # Application factory
-├── config.py           # Configuration management
-├── exceptions.py       # Custom exception classes
-├── logging_config.py   # Logging setup
-├── models/             # Data models
-│   ├── config.py       # Configuration model
-│   └── download.py     # Download data model
-├── routes/             # Flask route handlers
-│   ├── api.py          # API endpoints
-│   └── web.py          # Web page routes
-├── services/           # Business logic services
-│   ├── download_service.py          # Core download functionality
-│   ├── download_service_adapter.py  # Session isolation layer
-│   ├── service_registry.py          # Service dependency injection
-│   ├── cookie_manager.py           # Cookie encryption/decryption
-│   ├── network_utils.py            # Network connectivity checks
-│   └── progress_parser.py          # Download progress parsing
-└── utils.py            # Helper functions
-```
-
-### Frontend Structure
-
-```
-app/static/
-├── css/styles.css       # Styling for the interface
-├── js/main.js          # Client-side JavaScript functionality
-└── favicon.ico         # Site favicon
-
-app/templates/
-└── index.html          # Main application page
-```
-
-### Key Components
-
-1. **DownloadService**: Core service that manages gallery-dl subprocesses, tracks progress, and handles errors
-2. **DownloadServiceAdapter**: Session isolation layer that ensures users only see their own downloads
-3. **ServiceRegistry**: Dependency injection container for application services
-4. **CookieManager**: Secure encryption/decryption of authentication cookies
-5. **ProgressParser**: Real-time parsing of gallery-dl output to extract progress information
-
-## 🔐 Security Features
-
-- **Cookie Encryption**: All cookies are encrypted using Fernet (AES 128 in CBC mode) before storage
-- **Path Traversal Protection**: Secure file serving with path validation to prevent directory traversal
-- **Input Validation**: Comprehensive validation of URLs and other user inputs
-- **Session Isolation**: Each user session is isolated with unique download directories
-- **Rate Limiting Preparation**: Built-in structure for future rate limiting implementation
-- **CORS Handling**: Default Flask security measures for cross-origin requests
-
-## 📊 API Endpoints
-
-- `POST /api/download` - Start a new download
-- `GET /api/status/<download_id>` - Get status of a specific download
-- `GET /api/downloads` - List all downloads for current session
-- `DELETE /api/downloads/<download_id>` - Delete a specific download
-- `POST /api/cancel/<download_id>` - Cancel an active download
-- `GET /api/stats` - Get download statistics
-- `GET /api/config` - Get application configuration
-- `GET /api/files/<download_id>` - List files for a specific download
-- `GET /api/download-file/<download_id>/<filename>` - Download a specific file
-
-## 🧪 Testing
-
-Run the test suite:
+Start the FastAPI backend with Uvicorn:
 
 ```bash
-npm test
+uvicorn app.main:app --host 127.0.0.1 --port 6969 --reload
 # or
-pytest
+python run.py
 ```
 
-## 🤝 Contributing
+### 2. Frontend Setup
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for your changes
-5. Run the test suite (`pytest`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-## 📄 License
+Vite serves the Svelte 5 dev server with API proxying to the backend. To build the static production bundle served by FastAPI from `frontend/dist/`:
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+```bash
+cd frontend
+npm run build
+```
 
-## 🙏 Acknowledgments
+### 3. Linting, Type-Checking & Tests
 
-- [gallery-dl](https://github.com/mikf/gallery-dl) - The powerful command-line tool that makes this project possible
-- Flask - Web framework that powers the backend
-- All contributors and users of this project
+All Python tooling is unified in `pyproject.toml`:
 
-## 🔧 Development Scripts
+```bash
+# Backend checks
+ruff check app tests
+mypy app
+pytest
 
-The project includes npm scripts for common development tasks:
+# Frontend checks
+cd frontend
+npm run check
+npm test
+npm run build
+```
 
-- `npm run dev` - Start development server
-- `npm run test` - Run tests
-- `npm run lint` - Run linter
-- `npm run format` - Format code
-- `npm run type-check` - Run type checker
+Continuous Integration runs all backend checks, frontend checks, and a full `docker build` verification automatically via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-## 🐛 Troubleshooting
+## License
 
-### Common Issues
-
-1. **gallery-dl not found**: Ensure gallery-dl is installed with `pip install gallery-dl`
-2. **Permission errors**: Check file permissions for downloads and secure_cookies directories
-3. **Network errors**: Verify internet connectivity and firewall settings
-4. **Cookie format issues**: Ensure cookie files are in Netscape format
-
-### Debugging
-
-Enable debug mode by setting `FLASK_ENV=development` in your environment variables.
-
-For more detailed logs, set `LOG_LEVEL=DEBUG` in your environment variables.
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.

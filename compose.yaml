@@ -1,25 +1,27 @@
 services:
   server:
-    build:
-      context: .
-    image: renx86/gdl-web-server:latest
+    image: renx86/gdl-web:latest
+    build: .
     ports:
-      - "${PORT:-6969}:6969"
+      - "127.0.0.1:${PORT:-6969}:6969"
     volumes:
-      # Use named volumes instead of local folders
-      - downloads:/app/downloads
-      - cookies:/app/secure_cookies
+      - storage:/app/storage
     environment:
-      - FLASK_ENV=${FLASK_ENV}
-      # Removed hardcoded PORT so it can be inherited or default to internal
-      - DOWNLOADS_DIR=/app/downloads
-      - COOKIES_DIR=/app/secure_cookies
-      # Secrets are loaded from .env file
-      - COOKIES_ENCRYPTION_KEY=${COOKIES_ENCRYPTION_KEY}
+      - APP_ENV=${APP_ENV:-production}
+      - STORAGE_DIR=/app/storage
       - SECRET_KEY=${SECRET_KEY}
-    restart: always
+      - COOKIES_ENCRYPTION_KEY=${COOKIES_ENCRYPTION_KEY}
+      - ENABLE_RUNTIME_UPDATES=${ENABLE_RUNTIME_UPDATES:-false}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /dev/shm:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    restart: unless-stopped
 
-# Define the persistent storage volumes
 volumes:
-  downloads:
-  cookies:
+  storage:

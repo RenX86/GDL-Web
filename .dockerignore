@@ -1,92 +1,52 @@
-# ========================
-# Git
-# ========================
+# Git & CI
 .git/
+.github/
 .gitignore
+.gitattributes
 
-# ========================
-# Environment & Secrets
-# ========================
+# Python virtualenvs & caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Tests & coverage
+tests/
+htmlcov/
+.coverage*
+coverage.json
+
+# Runtime storage, media & secrets
 .env
 .env.*
 *.pem
 *.key
-
-# ========================
-# Python
-# ========================
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-dist/
-build/
-.Python
-
-# Virtual Environments
-.venv/
-venv/
-env/
-
-# Testing & Coverage
-.pytest_cache/
-.coverage
-.tox/
-htmlcov/
-
-# Type checkers
-.mypy_cache/
-.pyre/
-
-# ========================
-# Editors & IDEs
-# ========================
-.vscode/
-.idea/
-.cursor/
-*.swp
-*.swo
-*~
-
-# ========================
-# OS
-# ========================
-.DS_Store
-Thumbs.db
-Desktop.ini
-
-# ========================
-# Logs & Temp
-# ========================
+assets/
+downloads/
+test_downloads/
+secure_cookies/
+storage/
 *.log
-*.tmp
-*.temp
 
-# ========================
-# Docs & Notebooks
-# ========================
-docs/
+# Frontend build artifacts & local dependencies (installed fresh in builder stage)
+frontend/node_modules/
+frontend/dist/
+
+# Local orchestration, deployment configs & docs
+compose.yaml
+render.yaml
+gdl-web.ps1
 *.md
-.ipynb_checkpoints/
-
-# ========================
-# Docker itself
-# ========================
 Dockerfile*
-docker-compose*.yml
 .dockerignore
 
-# ========================
-# Node
-# ========================
-node_modules/
-
-# ========================
-# Misc
-# ========================
-.git
-.gitignore
-README*
-Trash/
-test_downloads/
-downloads/
+# Editors & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

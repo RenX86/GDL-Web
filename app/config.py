@@ -1,178 +1,139 @@
-# config.py - Single source of truth for all configuration
+"""Application configuration powered by pydantic-settings."""
+
+from __future__ import annotations
+
 import os
 import secrets
+import sys
 from pathlib import Path
-from dotenv import load_dotenv
-from flask import Flask
-from typing import Any, Optional
+from typing import Any, Literal
 
-# Load environment variables from .env file
-load_dotenv()
+from cryptography.fernet import Fernet
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Config:
-    """Base configuration class - all config should be defined here"""
+class Settings(BaseSettings):
+    """Strongly-typed runtime settings for GDL-Web."""
 
-    # Server Configuration
-    HOST = os.environ.get("HOST", "127.0.0.1")  # Default to localhost for security
-    PORT = int(os.environ.get("PORT", 5000))
-    # Generate a random secret key if not provided
-    SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
-
-    # Application Configuration
-    _downloads_dir = os.environ.get("DOWNLOADS_DIR")
-    
-    # Intelligent path handling for Windows vs Linux/Docker
-    if os.name == 'nt':
-        # If we are on Windows but the config is set to a Linux path (like /app/downloads from Dockerfile)
-        # we should ignore it and use a local folder to avoid confusion (C:\app\downloads)
-        if _downloads_dir and _downloads_dir.startswith('/'):
-            print(f"⚠️  Windows detected: Ignoring Linux path '{_downloads_dir}' for DOWNLOADS_DIR.")
-            _downloads_dir = None
-            
-    # Default to 'downloads' in current working directory if not set or invalid
-    DOWNLOADS_DIR = os.path.abspath(_downloads_dir or os.path.join(os.getcwd(), "downloads"))
-    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 16MB
-
-    # Security Configuration
-    COOKIES_DIR = os.environ.get("COOKIES_DIR") or os.path.join(
-        os.getcwd(), "secure_cookies"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
-    COOKIES_ENCRYPTION_KEY = os.environ.get("COOKIES_ENCRYPTION_KEY")
-    if not COOKIES_ENCRYPTION_KEY:
-        env = os.environ.get("FLASK_ENV", "development")
-        if env in ["development", "testing"]:
-            COOKIES_ENCRYPTION_KEY = secrets.token_hex(32)
-            print(
-                "⚠️  WARNING: Using generated encryption key for cookies. Set COOKIES_ENCRYPTION_KEY for production."
-            )
+
+    app_env: Literal["development", "production", "testing"] = "production"
+    host: str = "127.0.0.1"
+    port: int = Field(default=6969, ge=1, le=65535)
+    log_level: str = "INFO"
+
+    storage_dir: Path = Path("storage")
+    frontend_dist_dir: Path = Path("frontend/dist")
+
+    secret_key: str = ""
+    cookies_encryption_key: str = ""
+
+    # Request & cookie limits
+    max_content_length: int = Field(default=2 * 1024 * 1024, ge=1024)
+    max_cookies_bytes: int = Field(default=512 * 1024, ge=1024)
+
+    # Multi-user concurrency & storage quotas
+    max_concurrent_downloads_global: int = Field(default=6, ge=1)
+    max_concurrent_downloads_per_session: int = Field(default=2, ge=1)
+    max_filesize_mb: int = Field(default=500, ge=1)
+    max_downloads_per_job: int = Field(default=200, ge=1)
+    max_session_storage_mb: int = Field(default=1024, ge=1)
+    max_total_storage_mb: int = Field(default=8192, ge=1)
+    download_ttl_seconds: int = Field(default=3600, ge=60)
+    janitor_interval_seconds: int = Field(default=300, ge=5)
+    max_sse_connections_per_session: int = Field(default=5, ge=1)
+
+    # Feature flags & admin controls
+    rate_limit_enabled: bool = True
+    enable_runtime_updates: bool = False
+    admin_api_token: str = ""
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalize_app_env(cls, value: Any) -> Any:
+        """Default blank APP_ENV values to production so empty env vars never enable debug."""
+        if value is None:
+            return "production"
+        if isinstance(value, str):
+            stripped = value.strip().lower()
+            if not stripped:
+                return "production"
+            return stripped
+        return value
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: Any) -> str:
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+        return "INFO"
+
+    @model_validator(mode="after")
+    def _validate_and_provision_secrets(self) -> Settings:
+        if self.app_env == "production":
+            if not self.secret_key or len(self.secret_key) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be configured with at least 32 characters in production."
+                )
+            if not self.cookies_encryption_key:
+                raise ValueError(
+                    "COOKIES_ENCRYPTION_KEY must be configured in production."
+                )
+            self._validate_fernet_key(self.cookies_encryption_key)
         else:
-            raise RuntimeError(
-                "No COOKIES_ENCRYPTION_KEY set for Flask application. Please set it in your environment."
-            )
+            if not self.secret_key or len(self.secret_key) < 32:
+                self.secret_key = secrets.token_hex(32)
+            if not self.cookies_encryption_key:
+                self.cookies_encryption_key = Fernet.generate_key().decode("utf-8")
+            else:
+                self._validate_fernet_key(self.cookies_encryption_key)
+        return self
 
-    # Logging Configuration
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG")
-    LOG_FILE = os.environ.get("LOG_FILE", "app.log")
+    @staticmethod
+    def _validate_fernet_key(key: str) -> None:
+        try:
+            Fernet(key.encode("utf-8"))
+        except Exception as exc:
+            raise ValueError(
+                "COOKIES_ENCRYPTION_KEY must be a valid URL-safe base64-encoded 32-byte Fernet key."
+            ) from exc
 
-    # Gallery-dl Configuration
-    GALLERY_DL_CONFIG = {
-        "extractor": {
-            "filename": "{category}_{username}_{post_shortcode|post_id|shortcode|id}_{filename}.{extension}",
-            "write-info-json": True,
-            "videos": True,  # Explicitly enable video downloads
-            "animation": True,  # Enable animated files (gifs, etc)
-        },
-        "instagram": {
-            "filename": "PostBy_{username}_{post_shortcode}_{num}.{extension}",
-            "videos": True,
-        },
-        "twitter": {
-            "videos": True,
-            "retweets": False,
-        },
-        "wallhaven": {"filename": "wallhaven_{id}.{extension}"},  # explicit if you want
-    }
+    @property
+    def db_path(self) -> Path:
+        return self.storage_dir / "db" / "gdl.db"
 
-    # Default values for subclasses
-    DEBUG = False
-    TESTING = False
+    @property
+    def downloads_dir(self) -> Path:
+        return self.storage_dir / "downloads"
 
-    @classmethod
-    def init_app(cls, app: Flask) -> None:
-        """Initialize application with this config"""
-        # Create directories
-        os.makedirs(cls.DOWNLOADS_DIR, exist_ok=True)
-        os.makedirs(cls.COOKIES_DIR, exist_ok=True)
+    @property
+    def cookies_dir(self) -> Path:
+        shm_root = Path("/dev/shm")  # noqa: S108 - Linux RAM-backed tmpfs for 0o600 ephemeral cookies
+        if (
+            self.app_env != "testing"
+            and sys.platform.startswith("linux")
+            and shm_root.is_dir()
+            and os.access(shm_root, os.W_OK | os.X_OK)
+        ):
+            return shm_root / "gdl-cookies"
+        return self.storage_dir / "tmp_cookies"
 
-        # Apply all config to Flask app
-        app.config.update(
-            {
-                "SECRET_KEY": cls.SECRET_KEY,
-                "DOWNLOADS_DIR": cls.DOWNLOADS_DIR,
-                "MAX_CONTENT_LENGTH": cls.MAX_CONTENT_LENGTH,
-                "HOST": cls.HOST,
-                "PORT": cls.PORT,
-                "LOG_LEVEL": cls.LOG_LEVEL,
-                "LOG_FILE": cls.LOG_FILE,
-                "GALLERY_DL_CONFIG": cls.GALLERY_DL_CONFIG,
-                "COOKIES_DIR": cls.COOKIES_DIR,
-                "COOKIES_ENCRYPTION_KEY": cls.COOKIES_ENCRYPTION_KEY,
-                "DEBUG": cls.DEBUG,
-                "TESTING": cls.TESTING,
-            }
-        )
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
 
-        # Call subclass-specific initialization
-        cls._init_subclass_specific(app)  # type: ignore
-
-
-class DevelopmentConfig(Config):
-    """Development configuration"""
-
-    DEBUG = True
-    TESTING = False
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG")
-
-    @classmethod
-    def _init_subclass_specific(cls, app: Flask) -> None:
-        """Development-specific initialization"""
-        print("🔧 Development mode active")
-        print(f"📁 Downloads directory: {cls.DOWNLOADS_DIR}")
-        print(f"🌐 Server will run on {cls.HOST}:{cls.PORT}")
-
-
-class ProductionConfig(Config):
-    """Production configuration"""
-
-    DEBUG = False
-    TESTING = False
-    SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING")
-
-    # Production security headers
-    SECURITY_HEADERS = {
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
-        "X-XSS-Protection": "1; mode=block",
-    }
-
-    @classmethod
-    def _init_subclass_specific(cls, app: Flask) -> None:
-        """Production-specific initialization"""
-
-        # Add security headers middleware
-        @app.after_request
-        def set_security_headers(response: Any) -> Any:
-            for header, value in cls.SECURITY_HEADERS.items():
-                response.headers[header] = value
-            return response
-
-
-class TestingConfig(Config):
-    """Testing configuration"""
-
-    TESTING = True
-    DEBUG = True
-    DOWNLOADS_DIR = os.path.join(os.getcwd(), "test_downloads")
-
-    @classmethod
-    def _init_subclass_specific(cls, app: Flask) -> None:
-        """Testing-specific initialization"""
-        pass
-
-
-# Configuration registry
-config = {
-    "development": DevelopmentConfig,
-    "production": ProductionConfig,
-    "testing": TestingConfig,
-    "default": DevelopmentConfig,
-}
-
-
-def get_config(config_name: Optional[str] = None) -> type:
-    """Get configuration class by name"""
-    if config_name is None:
-        config_name = os.environ.get("FLASK_ENV", "development")
-    return config.get(config_name, config["default"])
+    def ensure_storage_dirs(self) -> None:
+        """Create required storage directories safely."""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.downloads_dir.mkdir(parents=True, exist_ok=True)
+        self.cookies_dir.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            try:
+                os.chmod(self.cookies_dir, 0o700)
+            except OSError:
+                pass

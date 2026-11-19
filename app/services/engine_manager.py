@@ -1,98 +1,169 @@
-import subprocess
-import threading
+"""Async engine version discovery and gated runtime update management."""
+
+from __future__ import annotations
+
+import asyncio
 import logging
-import sys
-import os
 import shutil
-from typing import Dict, Any
+import sys
+from pathlib import Path
+
+from app.exceptions import EngineUpdateDisabledError
+from app.schemas.system import EnginesResponse
+
+logger = logging.getLogger(__name__)
+
+
+def resolve_binary(binary: str) -> str | None:
+    """Resolve an executable in the active Python environment first, then PATH."""
+    venv_bin_dir = str(Path(sys.executable).parent)
+    return shutil.which(binary, path=venv_bin_dir) or shutil.which(binary)
+
 
 class EngineManager:
-    """
-    Service class to manage backend download engines (gallery-dl, yt-dlp).
-    Handles fetching current versions and updating them.
-    """
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self._update_lock = threading.Lock()
-        self._status = "idle"  # Can be 'idle', 'updating', 'error'
-        self._last_error = None
-        self._versions_cache = {
-            "gallery-dl": "Unknown",
-            "yt-dlp": "Unknown"
-        }
-        
-        # Load versions initially
-        self._refresh_versions()
+    """Manages version inspection and optional gated updates for gallery-dl, yt-dlp, and ffmpeg."""
 
-    def _get_tool_version(self, tool_name: str) -> str:
+    def __init__(self, enable_runtime_updates: bool = False) -> None:
+        self._enable_runtime_updates = enable_runtime_updates
+        self._update_lock = asyncio.Lock()
+        self._status = "idle"
+        self._last_error: str | None = None
+        self._versions: dict[str, str] = {
+            "gallery_dl": "unknown",
+            "yt_dlp": "unknown",
+            "ffmpeg": "unknown",
+        }
+        self._update_task: asyncio.Task[None] | None = None
+
+    @property
+    def runtime_updates_enabled(self) -> bool:
+        return self._enable_runtime_updates
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
+
+    async def _probe_binary(self, binary: str, args: list[str]) -> str:
+        executable = resolve_binary(binary)
+        if not executable:
+            return "not installed"
+
+        proc: asyncio.subprocess.Process | None = None
         try:
-            executable = shutil.which(tool_name)
-            if not executable:
-                return "Not installed"
-            
-            result = subprocess.run(
-                [executable, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
+            proc = await asyncio.create_subprocess_exec(
+                executable,
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if result.returncode == 0:
-                return result.stdout.strip()
-            return "Error"
-        except Exception as e:
-            self.logger.error(f"Error getting {tool_name} version: {e}")
-            return "Error"
+            stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            if proc.returncode == 0:
+                first_line = stdout_bytes.decode("utf-8", errors="replace").splitlines()
+                return first_line[0].strip() if first_line else "unknown"
+            return "error"
+        except TimeoutError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+            return "timeout"
+        except Exception as exc:
+            logger.debug("Version probe failed for %s: %s", binary, exc)
+            return "error"
 
-    def _refresh_versions(self):
-        self._versions_cache["gallery-dl"] = self._get_tool_version("gallery-dl")
-        self._versions_cache["yt-dlp"] = self._get_tool_version("yt-dlp")
-
-    def get_status(self) -> Dict[str, Any]:
-        """Returns the current status of the engines and updater."""
-        return {
-            "status": self._status,
-            "error": self._last_error,
-            "versions": self._versions_cache
+    async def refresh_versions(self) -> EnginesResponse:
+        """Refresh cached versions for gallery-dl, yt-dlp, and ffmpeg concurrently."""
+        gallery_dl, yt_dlp, ffmpeg = await asyncio.gather(
+            self._probe_binary("gallery-dl", ["--version"]),
+            self._probe_binary("yt-dlp", ["--version"]),
+            self._probe_binary("ffmpeg", ["-version"]),
+        )
+        self._versions = {
+            "gallery_dl": gallery_dl,
+            "yt_dlp": yt_dlp,
+            "ffmpeg": ffmpeg,
         }
+        return self.get_engines()
 
-    def _update_worker(self):
-        with self._update_lock:
+    def get_engines(self) -> EnginesResponse:
+        """Return cached engine versions and update feature flag."""
+        return EnginesResponse(
+            gallery_dl=self._versions["gallery_dl"],
+            yt_dlp=self._versions["yt_dlp"],
+            ffmpeg=self._versions["ffmpeg"],
+            runtime_updates_enabled=self._enable_runtime_updates,
+        )
+
+    def get_versions_dict(self) -> dict[str, str]:
+        """Return shallow copy of engine versions for health endpoint."""
+        return dict(self._versions)
+
+    async def trigger_update(self) -> dict[str, str]:
+        """Start an async pip upgrade of gallery-dl and yt-dlp when explicitly enabled."""
+        if not self._enable_runtime_updates:
+            raise EngineUpdateDisabledError(
+                "Runtime engine updates are disabled. Rebuild or redeploy the container image."
+            )
+
+        if self._update_lock.locked():
+            return {"status": "updating", "message": "An engine update is already in progress."}
+
+        self._update_task = asyncio.create_task(self._run_update())
+        return {"status": "updating", "message": "Engine update started."}
+
+    async def _run_update(self) -> None:
+        async with self._update_lock:
             self._status = "updating"
             self._last_error = None
+            proc: asyncio.subprocess.Process | None = None
             try:
-                self.logger.info("Starting engine update via pip...")
-                # We use python -m pip to ensure we use the current environment's pip
-                cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "gallery-dl", "yt-dlp"]
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # 5 minutes max
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "gallery-dl",
+                    "yt-dlp",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-                
-                if result.returncode == 0:
-                    self.logger.info("Engines updated successfully.")
+                _, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=300.0
+                )
+                if proc.returncode == 0:
                     self._status = "idle"
+                    logger.info("Engines upgraded successfully.")
                 else:
-                    self.logger.error(f"Failed to update engines: {result.stderr}")
                     self._status = "error"
-                    self._last_error = "Update failed. Check logs for details."
-            except Exception as e:
-                self.logger.error(f"Exception during engine update: {e}")
+                    self._last_error = "Engine update failed."
+                    logger.error(
+                        "Engine update failed with rc=%s: %s",
+                        proc.returncode,
+                        stderr_bytes.decode("utf-8", errors="replace")[:500],
+                    )
+            except TimeoutError:
+                if proc is not None and proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
                 self._status = "error"
-                self._last_error = str(e)
+                self._last_error = "Engine update timed out."
+            except Exception as exc:
+                self._status = "error"
+                self._last_error = "Engine update encountered an unexpected error."
+                logger.exception("Unexpected error during engine update: %s", exc)
             finally:
-                # Refresh versions regardless of success/failure to show current state
-                self._refresh_versions()
-                if self._status != "error":
-                    self._status = "idle"
+                await self.refresh_versions()
 
-    def trigger_update(self) -> Dict[str, Any]:
-        """Triggers an update of the engines if not already updating."""
-        if self._update_lock.locked():
-            return {"success": False, "message": "An update is already in progress."}
-        
-        thread = threading.Thread(target=self._update_worker, daemon=True)
-        thread.start()
-        return {"success": True, "message": "Update started."}
+    async def shutdown(self) -> None:
+        """Cancel any in-flight update task cleanly on app shutdown."""
+        if self._update_task is not None and not self._update_task.done():
+            self._update_task.cancel()
+            try:
+                await self._update_task
+            except asyncio.CancelledError:
+                pass
+            self._update_task = None

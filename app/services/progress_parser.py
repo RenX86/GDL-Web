@@ -1,43 +1,99 @@
-"""
-Progress Parser Module
+"""Progress parsing, error classification, and sanitization for gallery-dl and yt-dlp."""
 
-This module provides functions for parsing gallery-dl output to extract progress information.
-"""
+from __future__ import annotations
 
-import re
 import logging
 import os
-from typing import Dict, List, Any, Tuple
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_GALLERY_EXACT_RE = re.compile(r"\[download\]\s+(\d+)\s+of\s+(\d+)")
+_YTDLP_PCT_RE = re.compile(r"(\d+(?:\.\d+)?)%")
+_YTDLP_DEST_RE = re.compile(r"Destination:\s+(.*)$")
+_YTDLP_MERGER_QUOTED_RE = re.compile(r'Merging formats into "(.*)"')
+_FILE_EXT_RE = re.compile(
+    r".*\.(jpg|jpeg|png|gif|webp|mp4|webm|mov|avi|flv|wmv|mkv|mp3|m4a|wav|flac|txt|json|xml|pdf|html|htm|svg|bmp|ico)$",
+    re.IGNORECASE,
+)
+_GALLERY_PATH_RE = re.compile(
+    r"^.*[\/\\][^\/\\]+\.(jpg|jpeg|png|gif|webp|mp4|webm|mov|avi|flv|wmv|mkv|mp3|m4a|wav|flac|txt|json|xml|pdf|html|htm|svg|bmp|ico)$",
+    re.IGNORECASE,
+)
+_UNIX_PATH_RE = re.compile(r"(?:/[A-Za-z0-9._-]+){2,}")
+_WIN_PATH_RE = re.compile(r"[A-Za-z]:\\[^\s\"'<>|]+")
 
-def parse_progress(line: str, files_so_far: int = 0) -> Tuple[int, Dict[str, Any]]:
-    """
-    Update progress bar from a gallery-dl console line.
-    Returns the updated file counter and a dictionary of status updates.
-    """
-    updates: Dict[str, Any] = {}
+_ISP_BLOCK_PATTERNS: tuple[str, ...] = (
+    "unexpected_eof_while_reading",
+    "winerror 10054",
+    "forcibly closed by the remote host",
+)
+
+_NON_RETRIABLE_PATTERNS: tuple[str, ...] = (
+    "captcha",
+    "cloudflare",
+    "forbidden",
+    "http error 403",
+    "http error 404",
+    "http error 401",
+    "not found",
+    "private video",
+    "login required",
+    "sign in to confirm",
+    "unsupported url",
+    "unable to extract",
+    "copyright",
+    "geo-restricted",
+)
+
+_RETRIABLE_PATTERNS: tuple[str, ...] = (
+    "timed out",
+    "timeout",
+    "connection error",
+    "connection refused",
+    "connection reset",
+    "temporary failure",
+    "name or service not known",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "http error 502",
+    "http error 503",
+    "http error 504",
+    "remote end closed connection",
+)
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from console output."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def parse_progress(line: str, files_so_far: int = 0) -> tuple[int, dict[str, Any]]:
+    """Parse a gallery-dl console line into progress updates."""
+    updates: dict[str, Any] = {}
+    clean_line = strip_ansi(line)
 
     try:
-        # 1. gallery-dl printed "[download] 3 of 12" -> exact %
-        exact = re.search(r"\[download\]\s+(\d+)\s+of\s+(\d+)", line)
+        exact = _GALLERY_EXACT_RE.search(clean_line)
         if exact:
             current = int(exact.group(1))
             total = int(exact.group(2))
+            progress = 0 if total <= 0 else min(100, round(current / total * 100))
             updates = {
-                "progress": round(current / total * 100),
+                "progress": progress,
                 "files_downloaded": current,
                 "total_files": total,
-                "message": f"file {current}/{total}",
+                "message": f"File {current}/{total}",
             }
             return current, updates
 
-        # 2. Unknown total -> grow 5 % per finished file (cap 90 %)
-        line_stripped = line.strip().lower()
+        line_stripped = clean_line.strip().lower()
         if line_stripped.endswith(
-            (".webp", ".jpg", ".jpeg", ".png", ".mp4", ".webm")
-        ):  # finished a file
+            (".webp", ".jpg", ".jpeg", ".png", ".gif", ".mp4", ".webm", ".mkv", ".mp3", ".m4a")
+        ):
             files_so_far += 1
             updates = {
                 "files_downloaded": files_so_far,
@@ -46,197 +102,188 @@ def parse_progress(line: str, files_so_far: int = 0) -> Tuple[int, Dict[str, Any
             }
             return files_so_far, updates
 
-        # 3. Other stages -> fixed percentages
-        if "extracting" in line.lower():
-            updates = {"progress": 5, "message": "Extracting metadata …"}
+        if "extracting" in line_stripped:
+            updates = {"progress": 5, "message": "Extracting metadata..."}
             return files_so_far, updates
 
-        if "processing" in line.lower():
-            updates = {"progress": 98, "message": "Finalising …"}
+        if "processing" in line_stripped:
+            updates = {"progress": 98, "message": "Finalizing..."}
             return files_so_far, updates
 
         return files_so_far, updates
-    except Exception as e:
-        logger.debug("parse_progress error: %s", e)
+    except Exception as exc:
+        logger.debug("parse_progress error: %s", exc)
         return files_so_far, updates
 
 
 def parse_progress_ytdlp(
     line: str, files_so_far: int = 0
-) -> Tuple[int, Dict[str, Any]]:
-    """
-    Update progress bar from a yt-dlp console line.
-    """
-    updates: Dict[str, Any] = {}
-    line_lower = line.lower()
-    
+) -> tuple[int, dict[str, Any]]:
+    """Parse a yt-dlp console line into progress updates."""
+    updates: dict[str, Any] = {}
+    clean_line = strip_ansi(line)
+    line_lower = clean_line.lower()
+
     try:
-        # 1. Standard download progress: [download]  23.5% of ...
-        if "[download]" in line:
-            # Extract percentage
-            pct_match = re.search(r"(\d+(?:\.\d+)?)%", line)
+        if "[download]" in clean_line:
+            pct_match = _YTDLP_PCT_RE.search(clean_line)
             if pct_match:
                 pct = float(pct_match.group(1))
-                updates["progress"] = round(pct)
+                updates["progress"] = max(0, min(100, round(pct)))
                 updates["status"] = "downloading"
-                # Clean up the message to be more readable
-                msg = line.replace("[download]", "").strip()
-                updates["message"] = msg
+                updates["message"] = clean_line.replace("[download]", "").strip()
 
-            # Check if download finished (100%) to increment file count
-            if "100%" in line or "100.0%" in line:
+            if "100%" in clean_line or "100.0%" in clean_line:
                 updates["progress"] = 100
                 files_so_far += 1
                 updates["files_downloaded"] = files_so_far
                 return files_so_far, updates
 
-        # 2. Merging stage (usually the last step)
         if "[merger]" in line_lower or "merging formats" in line_lower:
             updates = {
                 "progress": 99,
-                "message": "Merging video and audio tracks..."
+                "message": "Merging video and audio tracks...",
             }
             return files_so_far, updates
-            
-        # 3. Processing/Fixing metadata
+
         if "[fixup" in line_lower or "fixing" in line_lower:
             updates = {
                 "progress": 99,
-                "message": "Finalizing video file..."
+                "message": "Finalizing video file...",
             }
             return files_so_far, updates
 
         return files_so_far, updates
-    except Exception as e:
-        logger.debug("parse_progress_ytdlp error: %s", e)
+    except Exception as exc:
+        logger.debug("parse_progress_ytdlp error: %s", exc)
         return files_so_far, updates
 
 
-def count_downloaded_files(stdout_lines: List[str]) -> int:
-    """
-    Count the number of files downloaded based on gallery-dl output.
-
-    Args:
-        stdout_lines (list): List of output lines from gallery-dl
-
-    Returns:
-        int: Number of files downloaded
-    """
+def count_downloaded_files(stdout_lines: list[str]) -> int:
+    """Count files indicated in gallery-dl stdout output."""
     count = 0
-    # Pattern to match gallery-dl output showing a file path
-    file_pattern = re.compile(
-        r".*\.(jpg|jpeg|png|gif|webp|mp4|webm|mov|avi|flv|wmv|mkv|mp3|wav|flac|txt|json|xml|pdf|html|htm|svg|bmp|ico)$",
-        re.IGNORECASE,
-    )
-
-    for line in stdout_lines:
-        # Look for lines indicating a file was downloaded
+    for raw_line in stdout_lines:
+        line = strip_ansi(raw_line).strip()
         if "Downloading" in line and " -> " in line:
             count += 1
-        # Also check for lines that contain file paths (gallery-dl often just prints the path when complete)
-        elif file_pattern.search(line.strip()):
-            # Additional check to make sure this is a download path and not just any file
+        elif _FILE_EXT_RE.search(line):
             line_lower = line.lower()
             if any(
                 ext in line_lower
-                for ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm"]
+                for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm")
             ):
                 count += 1
-
     return count
 
 
-def extract_downloaded_files_ytdlp(stdout_lines: List[str]) -> List[str]:
-    """
-    Extract the list of file paths downloaded based on yt-dlp output.
-    """
-    # First pass: Collect all potential files
-    potential_files = []
-    deleted_files = set()
-    
-    for line in stdout_lines:
-        # Strip ANSI escape codes (yt-dlp sometimes outputs them even with --no-colors)
-        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
-        line = line.strip()
-        
-        # [download] Destination: ...
+def extract_downloaded_files_ytdlp(stdout_lines: list[str]) -> list[str]:
+    """Extract deterministically-ordered downloaded file paths from yt-dlp output."""
+    potential_files: list[str] = []
+    deleted_files: set[str] = set()
+
+    for raw_line in stdout_lines:
+        line = strip_ansi(raw_line).strip()
+
         if "[download] Destination:" in line:
-            match = re.search(r'Destination:\s+(.*)$', line)
+            match = _YTDLP_DEST_RE.search(line)
             if match:
                 potential_files.append(match.group(1).strip())
-        # [Merger] Merging formats into "..."
         elif "Merging formats into" in line:
-            # Handle format: [Merger] Merging formats into "C:\path\to\file.mp4"
-            # We want to extract the path inside the quotes
-            match = re.search(r'Merging formats into "(.*)"', line)
+            match = _YTDLP_MERGER_QUOTED_RE.search(line)
             if match:
                 potential_files.append(match.group(1))
             else:
-                # Fallback if no quotes or different format
-                parts = line.split("into ", 1)
-                if len(parts) > 1:
-                    potential_files.append(parts[1].strip().strip('"'))
-        # Already downloaded
+                split_parts = line.split("into ", 1)
+                if len(split_parts) > 1:
+                    potential_files.append(split_parts[1].strip().strip('"'))
         elif "has already been downloaded" in line and "[download]" in line:
-            parts = line.replace("[download] ", "").split(" has already been downloaded")[0]
-            potential_files.append(parts.strip())
-        # Track deleted files: [yt-dlp-stdout] Deleting original file ...
+            already_path = line.replace("[download] ", "").split(
+                " has already been downloaded", 1
+            )[0]
+            potential_files.append(already_path.strip())
         elif "Deleting original file" in line:
-            # Handle format: Deleting original file C:\path\to\file.mp4 (pass -k to keep)
-            clean_line = line.replace("Deleting original file", "").strip()
-            # Remove the optional suffix
-            file_path = clean_line.split(" (pass -k to keep)")[0].strip()
-            # Normalize path for comparison
+            clean_part = line.replace("Deleting original file", "").strip()
+            file_path = clean_part.split(" (pass -k to keep)", 1)[0].strip()
             deleted_files.add(os.path.normpath(file_path))
 
-    # Second pass: Filter out deleted files
-    final_files = []
-    for f in potential_files:
-        # Normalize for comparison
-        norm_f = os.path.normpath(f)
-        # Check if this file was explicitly deleted
-        if norm_f not in deleted_files:
-            final_files.append(f)
-            
-    return list(set(final_files))  # unique
+    final_files = [
+        path for path in potential_files if os.path.normpath(path) not in deleted_files
+    ]
+    return list(dict.fromkeys(final_files))
 
-def extract_downloaded_files(stdout_lines: List[str]) -> List[str]:
-    """
-    Extract the list of file paths downloaded based on gallery-dl output.
 
-    Args:
-        stdout_lines (list): List of output lines from gallery-dl
+def extract_downloaded_files(stdout_lines: list[str]) -> list[str]:
+    """Extract deterministically-ordered downloaded file paths from gallery-dl output."""
+    files: list[str] = []
 
-    Returns:
-        list: List of file paths
-    """
-    files = []
-    # Pattern to match gallery-dl output showing a file path
-    file_pattern = re.compile(
-        r"^.*[\/\\][^\/\\]+\.(jpg|jpeg|png|gif|webp|mp4|webm|mov|avi|flv|wmv|mkv|mp3|wav|flac|txt|json|xml|pdf|html|htm|svg|bmp|ico)$",
-        re.IGNORECASE,
-    )
-
-    for line in stdout_lines:
-        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
-        line = line.strip()
-        # Handle "Downloading x -> y" format if present
+    for raw_line in stdout_lines:
+        line = strip_ansi(raw_line).strip()
         if "Downloading" in line and " -> " in line:
-            parts = line.split(" -> ")
-            if len(parts) > 1:
-                files.append(parts[1].strip())
+            split_parts = line.split(" -> ", 1)
+            if len(split_parts) > 1:
+                files.append(split_parts[1].strip())
                 continue
 
-        # Handle direct paths
-        # gallery-dl usually prints absolute or relative path on a single line
-        if file_pattern.match(line):
-            # Exclude lines that look like logs
-            if (
-                not line.startswith("[") and " " not in line
-            ):  # Paths usually don't have spaces unless filename has it, but logs definitely have spaces
-                files.append(line)
-            # Be more permissive if we are sure it is not a log line
-            elif not line.startswith("[") and not line.startswith("Downloading"):
-                files.append(line)
+        if _GALLERY_PATH_RE.match(line) and not line.startswith("[") and not line.startswith(
+            "Downloading"
+        ):
+            files.append(line)
 
-    return files
+    return list(dict.fromkeys(files))
+
+
+def is_isp_block_error(text: str) -> bool:
+    """Return True when error output matches ISP/TLS-reset blocking signatures."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in _ISP_BLOCK_PATTERNS)
+
+
+def is_retriable_error(text: str) -> bool:
+    """Return True only for transient network failures (never ISP blocks, captchas, or 4xx)."""
+    if not text:
+        return False
+    lowered = text.lower()
+    if is_isp_block_error(lowered):
+        return False
+    if any(pattern in lowered for pattern in _NON_RETRIABLE_PATTERNS):
+        return False
+    return any(pattern in lowered for pattern in _RETRIABLE_PATTERNS)
+
+
+def sanitize_error_message(raw_error: str, max_length: int = 300) -> str:
+    """Produce a safe, user-facing error message without filesystem paths or tracebacks."""
+    if not raw_error:
+        return "Download failed due to an unknown error."
+
+    cleaned = strip_ansi(raw_error)
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if not lines:
+        return "Download failed due to an unknown error."
+
+    # Prioritize explicit ERROR lines over WARNING or debug noise.
+    selected = ""
+    for line in lines:
+        if "error:" in line.lower():
+            selected = line
+            break
+
+    if not selected:
+        for line in reversed(lines):
+            if not line.lower().startswith("warning:"):
+                selected = line
+                break
+
+    if not selected:
+        selected = lines[-1]
+
+    # Strip filesystem paths so internal server structure is never leaked.
+    selected = _WIN_PATH_RE.sub("<path>", selected)
+    selected = _UNIX_PATH_RE.sub("<path>", selected)
+    selected = re.sub(r"\s+", " ", selected).strip()
+
+    if len(selected) > max_length:
+        selected = selected[: max_length - 3].rstrip() + "..."
+
+    return selected or "Download failed due to an unknown error."

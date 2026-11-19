@@ -1,70 +1,50 @@
-ARG PYTHON_VERSION=3.12.10
-FROM python:${PYTHON_VERSION}-alpine as builder
+# Stage 1: Build Svelte 5 + Vite frontend
+FROM node:22-slim AS frontend-builder
 
-WORKDIR /build
+WORKDIR /frontend
 
-# Install build dependencies
-# cargo/rust is required for compiling cryptography if no wheel is found
-# linux-headers is required for psutil
-RUN apk add --no-cache \
-    gcc \
-    musl-dev \
-    libffi-dev \
-    openssl-dev \
-    cargo \
-    python3-dev \
-    linux-headers
+COPY frontend/package*.json ./
+RUN npm ci
 
-# Create wheels for dependencies
-# This compiles anything that needs compiling in this disposable stage
-COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir /build/wheels -r requirements.txt
+COPY frontend/ ./
+RUN npm run build
 
 
-FROM python:${PYTHON_VERSION}-alpine
+# Stage 2: Python 3.12 runtime with ffmpeg (unified for Render and local Docker)
+FROM python:3.12-slim AS runtime
 
-# Prevents Python from writing pyc files.
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=6969 \
+    APP_ENV=production \
+    STORAGE_DIR=/app/storage
 
 WORKDIR /app
 
-# Install runtime dependencies
-# ffmpeg: media processing
-# libffi, openssl: runtime libraries for python packages (cryptography)
-RUN apk add --no-cache \
-    ffmpeg \
-    libffi \
-    openssl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create a non-privileged user
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
 ARG UID=10001
-RUN adduser \
-    -D \
-    -u "${UID}" \
-    -h "/nonexistent" \
-    -s "/sbin/nologin" \
-    appuser
+RUN groupadd --system --gid "${UID}" appuser && \
+    useradd --system --uid "${UID}" --gid appuser --no-create-home --home-dir /tmp --shell /usr/sbin/nologin appuser
 
-# Copy wheels from builder and install
-COPY --from=builder /build/wheels /wheels
-RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* \
-    && rm -rf /wheels
+COPY --chown=root:root app/ /app/app/
+COPY --chown=root:root run.py /app/run.py
+COPY --from=frontend-builder --chown=root:root /frontend/dist /app/frontend/dist
 
-# Switch to the non-privileged user to run the application.
-USER appuser
+RUN mkdir -p /app/storage/downloads /app/storage/db /app/storage/tmp_cookies && \
+    chown -R appuser:appuser /app/storage && \
+    chmod 700 /app/storage/tmp_cookies
 
-# Copy the source code into the container.
-COPY . .
-
-# Create directories for persistence and set permissions
-USER root
-RUN mkdir -p /app/downloads /app/secure_cookies && \
-    chown -R appuser:appuser /app
-
-# Switch back to appuser
 USER appuser
 
 EXPOSE 6969
 
-CMD ["gunicorn", "--workers=1", "--threads=8", "--bind=0.0.0.0:6969", "--access-logfile=-", "run:app"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"6969\")}/health', timeout=3)"
+
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-6969} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]

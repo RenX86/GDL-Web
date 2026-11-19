@@ -1,29 +1,30 @@
 services:
   - type: web
     name: gdl-web
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -k gthread --threads 100 --bind 0.0.0.0:$PORT run:app
+    runtime: docker
+    healthCheckPath: /health
+    disk:
+      name: gdl-storage
+      mountPath: /app/storage
+      sizeGB: 10
     envVars:
-      - key: FLASK_ENV
+      - key: APP_ENV
         value: production
-      - key: HOST
-        value: 0.0.0.0
+      - key: STORAGE_DIR
+        value: /app/storage
       - key: SECRET_KEY
-        sync: false
+        generateValue: true
       - key: COOKIES_ENCRYPTION_KEY
         sync: false
-      - key: DOWNLOADS_DIR
-        value: downloads
-      - key: COOKIES_DIR
-        value: secure_cookies
-      - key: MAX_CONTENT_LENGTH
-        value: 16777216
+      - key: ENABLE_RUNTIME_UPDATES
+        value: "false"
       - key: LOG_LEVEL
         value: INFO
-      - key: LOG_FILE
-        value: app.log
-    disk:
-      name: downloads
-      mountPath: /app/downloads
-      sizeGB: 10
+      - key: MAX_CONCURRENT_DOWNLOADS_GLOBAL
+        value: "6"
+      - key: MAX_CONCURRENT_DOWNLOADS_PER_SESSION
+        value: "2"
+      - key: MAX_FILESIZE_MB
+        value: "500"
+      - key: DOWNLOAD_TTL_SECONDS
+        value: "3600"
